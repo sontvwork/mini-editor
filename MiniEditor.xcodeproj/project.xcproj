@@ -54,8 +54,7 @@
         "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
         "SWIFT_VERSION": "6.0",
       },
-    },
-    {
+    }, {
       "name": "MiniEditorTests",
       "id": "000000000000000200000000",
       "product": "Products/MiniEditorTests.xctest",

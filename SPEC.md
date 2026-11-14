@@ -317,7 +317,7 @@ Mỗi milestone làm trong một phiên riêng. Xong một milestone → build, 
   - Thêm target Unit Testing Bundle `MiniEditorTests`. Nếu không sửa `project.xcproj` một cách an toàn được thì dừng lại, nhờ người dùng tạo bằng Xcode (File › New › Target › Unit Testing Bundle).
   - Thêm `.gitignore` (`build/`, `xcuserdata/`, `.DS_Store`).
   - Nghiệm thu: app mở được một cửa sổ dark trống; lệnh build và test trong `CLAUDE.md` chạy thành công.
-- [ ] **M1 — Một editor:** `CodeTextView` dùng TextKit 1, font và fallback, ⌘+/⌘−/⌘0, số dòng, theme, thanh trạng thái (Dòng/Cột, Cỡ chữ).
+- [x] **M1 — Một editor:** `CodeTextView` dùng TextKit 1, font và fallback, ⌘+/⌘−/⌘0, số dòng, theme, thanh trạng thái (Dòng/Cột, Cỡ chữ).
 - [ ] **M2 — Sidebar:** thêm/gỡ workspace, cây thư mục, nhóm NHÁP (chưa cần nội dung), FSEvents, ⌘B.
 - [ ] **M3 — Tab & cột:** `ColumnLayoutEngine` có đủ unit test cho mọi quy tắc 3.2, `ColumnsViewController` thêm/bớt cột động, thanh tab, các phím tắt tab/cột.
 - [ ] **M4 — Tự động lưu & session:** AutosaveService (giữ quyền file, giữ kiểu xuống dòng), DraftStore, ⌘N, ⌘S/Save As, SessionStore và khôi phục đầy đủ. Test: tắt app bằng `kill -9` rồi mở lại.

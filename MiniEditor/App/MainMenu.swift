@@ -7,6 +7,7 @@ enum MainMenu {
         let mainMenu = NSMenu()
         mainMenu.addItem(submenuItem(appMenu()))
         mainMenu.addItem(submenuItem(editMenu()))
+        mainMenu.addItem(submenuItem(viewMenu()))
 
         let window = windowMenu()
         mainMenu.addItem(submenuItem(window))
@@ -49,6 +50,26 @@ enum MainMenu {
         menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        return menu
+    }
+
+    private static func viewMenu() -> NSMenu {
+        let menu = NSMenu(title: "View")
+        menu.addItem(withTitle: "Increase Font Size",
+                     action: #selector(AppDelegate.increaseEditorFontSize(_:)),
+                     keyEquivalent: "+")
+        // ⌘= (không cần Shift) cũng tăng cỡ chữ; mục ẩn chỉ để bắt phím.
+        let increaseAlias = menu.addItem(withTitle: "Increase Font Size",
+                                         action: #selector(AppDelegate.increaseEditorFontSize(_:)),
+                                         keyEquivalent: "=")
+        increaseAlias.isHidden = true
+        increaseAlias.allowsKeyEquivalentWhenHidden = true
+        menu.addItem(withTitle: "Decrease Font Size",
+                     action: #selector(AppDelegate.decreaseEditorFontSize(_:)),
+                     keyEquivalent: "-")
+        menu.addItem(withTitle: "Reset Font Size",
+                     action: #selector(AppDelegate.resetEditorFontSize(_:)),
+                     keyEquivalent: "0")
         return menu
     }
 

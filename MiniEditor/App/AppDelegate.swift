@@ -2,7 +2,8 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var window: NSWindow?
+    private let appState = AppState()
+    private var windowController: MainWindowController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -10,22 +11,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let window = NSWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 1400, height: 860),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "MiniEditor"
-        window.isReleasedWhenClosed = false
-        window.backgroundColor = Theme.editorBackground
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        self.window = window
+        let controller = MainWindowController(appState: appState)
+        controller.showWindow(nil)
+        windowController = controller
         NSApp.activate()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    // MARK: - Cỡ chữ (⌘+ / ⌘− / ⌘0)
+
+    @objc func increaseEditorFontSize(_ sender: Any?) {
+        appState.increaseFontSize()
+    }
+
+    @objc func decreaseEditorFontSize(_ sender: Any?) {
+        appState.decreaseFontSize()
+    }
+
+    @objc func resetEditorFontSize(_ sender: Any?) {
+        appState.resetFontSize()
     }
 }
