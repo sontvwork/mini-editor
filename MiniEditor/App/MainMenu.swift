@@ -6,6 +6,7 @@ enum MainMenu {
     static func build() -> NSMenu {
         let mainMenu = NSMenu()
         mainMenu.addItem(submenuItem(appMenu()))
+        mainMenu.addItem(submenuItem(fileMenu()))
         mainMenu.addItem(submenuItem(editMenu()))
         mainMenu.addItem(submenuItem(viewMenu()))
 
@@ -40,6 +41,14 @@ enum MainMenu {
         return menu
     }
 
+    private static func fileMenu() -> NSMenu {
+        let menu = NSMenu(title: "File")
+        menu.addItem(withTitle: "Add Workspace…",
+                     action: #selector(AppDelegate.addWorkspace(_:)),
+                     keyEquivalent: "o")
+        return menu
+    }
+
     private static func editMenu() -> NSMenu {
         let menu = NSMenu(title: "Edit")
         menu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
@@ -55,6 +64,10 @@ enum MainMenu {
 
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
+        menu.addItem(withTitle: "Toggle Sidebar",
+                     action: #selector(AppDelegate.toggleWorkspaceSidebar(_:)),
+                     keyEquivalent: "b")
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Increase Font Size",
                      action: #selector(AppDelegate.increaseEditorFontSize(_:)),
                      keyEquivalent: "+")

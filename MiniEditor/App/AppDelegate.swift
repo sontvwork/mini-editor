@@ -21,6 +21,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    // MARK: - Workspace & sidebar
+
+    @objc func addWorkspace(_ sender: Any?) {
+        windowController?.showAddWorkspacePanel()
+    }
+
+    @objc func toggleWorkspaceSidebar(_ sender: Any?) {
+        windowController?.toggleSidebar()
+    }
+
     // MARK: - Cỡ chữ (⌘+ / ⌘− / ⌘0)
 
     @objc func increaseEditorFontSize(_ sender: Any?) {
