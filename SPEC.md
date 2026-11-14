@@ -311,7 +311,7 @@ Khi khôi phục: file trong `tabs` không còn tồn tại thì bỏ qua tab đ
 
 Mỗi milestone làm trong một phiên riêng. Xong một milestone → build, chạy test, dừng lại để người dùng review trước khi làm tiếp. Đánh dấu `[x]` khi xong.
 
-- [ ] **M0 — Khung project** (project đã được tạo sẵn bằng Xcode từ template SwiftUI):
+- [x] **M0 — Khung project** (project đã được tạo sẵn bằng Xcode từ template SwiftUI):
   - Xoá `ContentView.swift` và `MyApp.swift` (template SwiftUI). Thay bằng `main.swift` + `AppDelegate.swift` thuần AppKit, dựng menu bằng code.
   - Trong `project.xcproj`: Swift Language Version = 6, Strict Concurrency Checking = Complete, macOS Deployment Target = bản cao nhất SDK hỗ trợ, đổi Bundle Identifier khỏi `devplaceholder.…`. Kiểm tra không còn entitlement App Sandbox.
   - Thêm target Unit Testing Bundle `MiniEditorTests`. Nếu không sửa `project.xcproj` một cách an toàn được thì dừng lại, nhờ người dùng tạo bằng Xcode (File › New › Target › Unit Testing Bundle).
