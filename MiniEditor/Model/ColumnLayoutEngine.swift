@@ -80,6 +80,32 @@ enum ColumnLayoutEngine {
         return result
     }
 
+    /// Thay một tab bằng tab khác (nháp vừa Save As thành file, SPEC §3.5).
+    /// Ở lại chỗ cũ nếu cột hợp với workspace của tab mới; nếu không thì đóng rồi mở lại theo quy tắc 2.
+    static func replace(_ old: BufferID, with tab: Tab, in layout: ColumnLayout,
+                        newColumnID: () -> UUID = { UUID() }) -> ColumnLayout {
+        guard let (columnIndex, tabIndex) = layout.location(of: old) else { return layout }
+        if old != tab.buffer, layout.location(of: tab.buffer) != nil {
+            // Tab mới đã mở ở chỗ khác → chỉ cần bỏ tab cũ và focus tab kia.
+            return activate(tab.buffer, in: close(old, in: layout))
+        }
+        let column = layout.columns[columnIndex]
+        let fitsInPlace = tab.workspaceID == nil
+            || column.workspaceID == tab.workspaceID
+            || (layout.columns.count == 1 && column.workspaceID == nil)
+        guard fitsInPlace else {
+            return open(tab, in: close(old, in: layout), newColumnID: newColumnID)
+        }
+        var result = layout
+        if let workspaceID = tab.workspaceID {
+            result.columns[columnIndex].workspaceID = workspaceID
+        }
+        result.columns[columnIndex].tabs[tabIndex] = tab
+        result.columns[columnIndex].activeIndex = tabIndex
+        result.focusedIndex = columnIndex
+        return result
+    }
+
     /// Gỡ workspace khỏi sidebar: đóng mọi tab của nó (quy tắc 5).
     static func removeWorkspace(_ workspaceID: UUID, from layout: ColumnLayout) -> ColumnLayout {
         var result = layout

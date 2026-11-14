@@ -1,12 +1,15 @@
 import AppKit
 
-/// Thanh trạng thái dưới cùng cửa sổ (SPEC §3.9). M1: `Dòng X, Cột Y` · `Cỡ chữ N`.
+/// Thanh trạng thái dưới cùng cửa sổ (SPEC §3.9): `UTF-8` · `Dòng X, Cột Y` · `Cỡ chữ N` · trạng thái lưu.
+/// (Tên ngôn ngữ có ở M6.)
 @MainActor
 final class StatusBarView: NSView {
     static let height: CGFloat = 24
 
+    private let encodingLabel = StatusBarView.makeLabel()
     private let cursorLabel = StatusBarView.makeLabel()
     private let fontSizeLabel = StatusBarView.makeLabel()
+    private let saveLabel = StatusBarView.makeLabel()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -19,7 +22,8 @@ final class StatusBarView: NSView {
         topBorder.fillColor = Theme.border
         topBorder.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [cursorLabel, fontSizeLabel])
+        encodingLabel.stringValue = "UTF-8"
+        let stack = NSStackView(views: [encodingLabel, cursorLabel, fontSizeLabel, saveLabel])
         stack.orientation = .horizontal
         stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -48,6 +52,17 @@ final class StatusBarView: NSView {
 
     func setFontSize(_ size: CGFloat) {
         fontSizeLabel.stringValue = "Cỡ chữ \(Int(size))"
+    }
+
+    /// `nil` = không có buffer nào đang active.
+    func setSaveState(_ state: Buffer.SaveState?, isReadOnly: Bool = false) {
+        switch state {
+        case nil: saveLabel.stringValue = ""
+        case _ where isReadOnly: saveLabel.stringValue = "Chỉ đọc"
+        case .saved: saveLabel.stringValue = "● Đã lưu tự động"
+        case .pending: saveLabel.stringValue = "Đang lưu…"
+        case .failed: saveLabel.stringValue = "⚠ Lỗi lưu"
+        }
     }
 
     private static func makeLabel() -> NSTextField {

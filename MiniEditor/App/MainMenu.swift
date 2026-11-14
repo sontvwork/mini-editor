@@ -43,10 +43,16 @@ enum MainMenu {
 
     private static func fileMenu() -> NSMenu {
         let menu = NSMenu(title: "File")
+        menu.addItem(withTitle: "New Draft",
+                     action: #selector(AppDelegate.newDraft(_:)),
+                     keyEquivalent: "n")
         menu.addItem(withTitle: "Add Workspace…",
                      action: #selector(AppDelegate.addWorkspace(_:)),
                      keyEquivalent: "o")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "Save",
+                     action: #selector(AppDelegate.saveDocument(_:)),
+                     keyEquivalent: "s")
         menu.addItem(withTitle: "Close Tab",
                      action: #selector(AppDelegate.closeEditorTab(_:)),
                      keyEquivalent: "w")

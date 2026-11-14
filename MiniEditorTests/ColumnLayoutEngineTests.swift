@@ -301,3 +301,54 @@ final class ColumnLayoutEngineTests: XCTestCase {
         XCTAssertEqual(layout.columns[0].activeTab, a1)
     }
 }
+
+/// `replace`: nháp được Save As thành file (SPEC §3.5).
+final class ColumnLayoutEngineReplaceTests: XCTestCase {
+    private let wsA = UUID()
+    private let wsB = UUID()
+
+    private func file(_ name: String, _ workspace: UUID?) -> Tab {
+        Tab(buffer: .file(path: URL(fileURLWithPath: "/ws/\(name)")), workspaceID: workspace)
+    }
+
+    func testDraftSavedIntoSameWorkspaceStaysInPlace() {
+        let d = Tab(buffer: .draft(UUID()), workspaceID: nil)
+        var layout = ColumnLayoutEngine.open(file("a1", wsA), in: .initial())
+        layout = ColumnLayoutEngine.open(d, in: layout)
+        layout = ColumnLayoutEngine.open(file("a2", wsA), in: layout)
+        let saved = file("new", wsA)
+        layout = ColumnLayoutEngine.replace(d.buffer, with: saved, in: layout)
+        XCTAssertEqual(layout.columns[0].tabs[1], saved)
+        XCTAssertEqual(layout.columns[0].activeIndex, 1)
+    }
+
+    func testDraftInWorkspacelessSingleColumnTakesWorkspace() {
+        let d = Tab(buffer: .draft(UUID()), workspaceID: nil)
+        var layout = ColumnLayoutEngine.open(d, in: .initial())
+        layout = ColumnLayoutEngine.replace(d.buffer, with: file("new", wsA), in: layout)
+        XCTAssertEqual(layout.columns.count, 1)
+        XCTAssertEqual(layout.columns[0].workspaceID, wsA)
+    }
+
+    func testDraftSavedIntoOtherWorkspaceMovesToItsColumn() {
+        let d = Tab(buffer: .draft(UUID()), workspaceID: nil)
+        var layout = ColumnLayoutEngine.open(file("a1", wsA), in: .initial())
+        layout = ColumnLayoutEngine.open(file("b1", wsB), in: layout)
+        layout = ColumnLayoutEngine.open(d, in: layout) // ở cột B
+        let saved = file("new", wsA)
+        layout = ColumnLayoutEngine.replace(d.buffer, with: saved, in: layout)
+        XCTAssertEqual(layout.columns.map(\.workspaceID), [wsA, wsB])
+        XCTAssertEqual(layout.columns[0].activeTab, saved)
+        XCTAssertEqual(layout.columns[1].tabs.count, 1)
+        XCTAssertEqual(layout.focusedIndex, 0)
+    }
+
+    func testDraftSavedIntoNewWorkspaceCreatesColumn() {
+        let d = Tab(buffer: .draft(UUID()), workspaceID: nil)
+        var layout = ColumnLayoutEngine.open(file("a1", wsA), in: .initial())
+        layout = ColumnLayoutEngine.open(d, in: layout)
+        layout = ColumnLayoutEngine.replace(d.buffer, with: file("new", wsB), in: layout)
+        XCTAssertEqual(layout.columns.map(\.workspaceID), [wsA, wsB])
+        XCTAssertEqual(layout.focusedIndex, 1)
+    }
+}

@@ -8,10 +8,16 @@ struct Workspace: Identifiable, Equatable {
     var expandedDirs: Set<String> = []
     /// Nhóm workspace đang bị thu gọn trên sidebar.
     var collapsed = false
+    /// Thư mục không còn trên đĩa lúc khôi phục (hiện mờ kèm "(không tìm thấy)").
+    var isMissing = false
 
-    init(id: UUID = UUID(), url: URL) {
+    init(id: UUID = UUID(), url: URL, expandedDirs: Set<String> = [], collapsed: Bool = false) {
         self.id = id
         self.url = url.standardizedFileURL
+        self.expandedDirs = expandedDirs
+        self.collapsed = collapsed
+        var isDirectory: ObjCBool = false
+        isMissing = !(FileManager.default.fileExists(atPath: self.url.path, isDirectory: &isDirectory) && isDirectory.boolValue)
     }
 
     /// Tên hiển thị trên sidebar (viết HOA).

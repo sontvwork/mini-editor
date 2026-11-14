@@ -16,6 +16,8 @@ final class ColumnsViewController: NSViewController {
 
     /// Vị trí con trỏ của cột đang focus.
     var onCursorChange: ((Int, Int) -> Void)?
+    /// Con trỏ/cuộn/độ rộng cột đổi → cần ghi session.
+    var onViewStateChange: (() -> Void)?
 
     init(appState: AppState) {
         self.appState = appState
@@ -32,6 +34,10 @@ final class ColumnsViewController: NSViewController {
         splitView.dividerStyle = .thin
         splitView.arrangesAllSubviews = true
         view = splitView
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(splitViewDidResize),
+            name: NSSplitView.didResizeSubviewsNotification, object: splitView
+        )
     }
 
     var focusedColumnView: EditorColumnView? {
@@ -77,6 +83,41 @@ final class ColumnsViewController: NSViewController {
         columnViews.values.forEach { $0.setFontSize(size) }
     }
 
+    /// Cập nhật banner của cột đang hiện buffer này.
+    func refreshBanner(for buffer: Buffer) {
+        columnViews.values.filter { $0.displayedBuffer === buffer }.forEach { $0.refreshBanner() }
+    }
+
+    /// Ghi vị trí con trỏ/cuộn hiện tại vào các buffer đang hiện.
+    func saveDisplayedStates() {
+        columnViews.values.forEach { $0.saveDisplayedState() }
+    }
+
+    /// Tỉ lệ độ rộng các cột theo thứ tự (tổng = 1).
+    func columnWidthRatios() -> [Double] {
+        let widths = splitView.arrangedSubviews.map { Double($0.frame.width) }
+        let total = widths.reduce(0, +)
+        guard total > 0 else { return widths.map { _ in 1 / Double(max(widths.count, 1)) } }
+        return widths.map { $0 / total }
+    }
+
+    /// Đặt độ rộng các cột theo tỉ lệ đã lưu (khôi phục session).
+    func applyColumnWidthRatios(_ ratios: [Double]) {
+        let count = splitView.arrangedSubviews.count
+        guard count > 1, ratios.count == count else { return }
+        let sum = ratios.reduce(0, +)
+        guard sum > 0 else { return }
+        splitView.layoutSubtreeIfNeeded()
+        let divider = splitView.dividerThickness
+        let available = splitView.bounds.width - divider * CGFloat(count - 1)
+        guard available > 0 else { return }
+        var position: CGFloat = 0
+        for index in 0..<(count - 1) {
+            position += available * CGFloat(ratios[index] / sum)
+            splitView.setPosition(position + divider * CGFloat(index), ofDividerAt: index)
+        }
+    }
+
     // MARK: - Private
 
     private func makeColumnView(id: Column.ID) -> EditorColumnView {
@@ -93,11 +134,16 @@ final class ColumnsViewController: NSViewController {
         }
         view.onSelectTab = { [weak self] buffer in self?.appState.activateTab(buffer) }
         view.onCloseTab = { [weak self] buffer in self?.appState.closeTab(buffer) }
+        view.onViewStateChange = { [weak self] in self?.onViewStateChange?() }
         view.onCursorChange = { [weak self] line, column in
             guard let self, self.appState.layout.focusedColumn.id == id else { return }
             self.onCursorChange?(line, column)
         }
         return view
+    }
+
+    @objc private func splitViewDidResize() {
+        onViewStateChange?()
     }
 
     /// Chia đều độ rộng các cột.

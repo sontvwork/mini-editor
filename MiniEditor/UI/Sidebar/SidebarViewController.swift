@@ -15,9 +15,16 @@ private final class WorkspaceItem {
     }
 }
 
-/// Nhóm NHÁP luôn nằm cuối sidebar. (Nội dung nháp có từ M4.)
+/// Nhóm NHÁP luôn nằm cuối sidebar.
 @MainActor
 private final class DraftsGroupItem {}
+
+/// Một nháp trong nhóm NHÁP.
+@MainActor
+private final class DraftItem {
+    let id: UUID
+    init(id: UUID) { self.id = id }
+}
 
 /// Sidebar: `NSOutlineView` dạng source list (SPEC §3.1).
 @MainActor
@@ -28,13 +35,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let outlineView = NSOutlineView()
     private var workspaceItems: [WorkspaceItem] = []
     private let draftsItem = DraftsGroupItem()
+    private var draftItems: [DraftItem] = []
     /// Đang tự mở lại các thư mục → không ghi ngược trạng thái vào AppState.
     private var isRestoringExpansion = false
-    /// File đang active trong cột đang focus (được highlight).
-    private var highlightedURL: URL?
+    /// Buffer đang active trong cột đang focus (được highlight).
+    private var highlightedBuffer: BufferID?
 
     /// Click 1 lần vào file.
     var onOpenFile: ((URL) -> Void)?
+    /// Click vào một nháp trong nhóm NHÁP.
+    var onOpenDraft: ((UUID) -> Void)?
 
     init(appState: AppState) {
         self.appState = appState
@@ -102,8 +112,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func reloadWorkspaces() {
         let existing = Dictionary(uniqueKeysWithValues: workspaceItems.map { ($0.id, $0) })
         workspaceItems = appState.workspaces.map { existing[$0.id] ?? WorkspaceItem(workspace: $0) }
+        syncDraftItems()
         outlineView.reloadData()
         withRestoringExpansion {
+            outlineView.expandItem(draftsItem)
             for item in workspaceItems {
                 guard let workspace = appState.workspace(id: item.id), !workspace.collapsed else { continue }
                 outlineView.expandItem(item)
@@ -113,10 +125,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         applyHighlight()
     }
 
-    /// Highlight file đang active trong cột đang focus (`nil` = bỏ highlight).
+    /// Đồng bộ nhóm NHÁP với `appState.drafts`.
+    func reloadDrafts() {
+        syncDraftItems()
+        outlineView.reloadItem(draftsItem, reloadChildren: true)
+        withRestoringExpansion { outlineView.expandItem(draftsItem) }
+        applyHighlight()
+    }
+
+    /// Highlight buffer đang active trong cột đang focus (`nil` = bỏ highlight).
     /// Chỉ chọn dòng đang hiện, không tự mở thư mục cha.
-    func highlightFile(_ url: URL?) {
-        highlightedURL = url?.standardizedFileURL
+    func highlight(_ buffer: BufferID?) {
+        highlightedBuffer = buffer
         applyHighlight()
     }
 
@@ -157,12 +177,23 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         applyHighlight()
     }
 
+    private func syncDraftItems() {
+        let existing = Dictionary(uniqueKeysWithValues: draftItems.map { ($0.id, $0) })
+        draftItems = appState.drafts.map { existing[$0.id] ?? DraftItem(id: $0.id) }
+    }
+
     private func applyHighlight() {
-        guard let url = highlightedURL, let node = visibleNode(for: url) else {
+        let item: Any?
+        switch highlightedBuffer {
+        case let .file(url): item = visibleNode(for: url)
+        case let .draft(id): item = draftItems.first { $0.id == id }
+        case nil: item = nil
+        }
+        let row = item.map { outlineView.row(forItem: $0) } ?? -1
+        guard row >= 0 else {
             outlineView.deselectAll(nil)
             return
         }
-        let row = outlineView.row(forItem: node)
         outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         outlineView.scrollRowToVisible(row)
     }
@@ -215,8 +246,19 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     @objc private func rowClicked(_ sender: Any?) {
         let row = outlineView.clickedRow
-        guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode, !node.isDirectory else { return }
-        onOpenFile?(node.url)
+        guard row >= 0 else { return }
+        switch outlineView.item(atRow: row) {
+        case let node as FileNode where !node.isDirectory:
+            onOpenFile?(node.url)
+        case let draft as DraftItem:
+            onOpenDraft?(draft.id)
+        default:
+            break
+        }
+    }
+
+    private func isMissing(_ item: WorkspaceItem) -> Bool {
+        appState.workspace(id: item.id)?.isMissing ?? false
     }
 
     @objc private func removeWorkspace(_ sender: NSMenuItem) {
@@ -229,8 +271,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         switch item {
         case nil: workspaceItems.count + 1
-        case let workspace as WorkspaceItem: workspace.root.loadedChildren().count
+        case let workspace as WorkspaceItem: isMissing(workspace) ? 0 : workspace.root.loadedChildren().count
         case let node as FileNode: node.loadedChildren().count
+        case is DraftsGroupItem: draftItems.count
         default: 0
         }
     }
@@ -240,14 +283,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         case nil: index < workspaceItems.count ? workspaceItems[index] : draftsItem
         case let workspace as WorkspaceItem: workspace.root.loadedChildren()[index]
         case let node as FileNode: node.loadedChildren()[index]
+        case is DraftsGroupItem: draftItems[index]
         default: draftsItem
         }
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
         switch item {
-        case is WorkspaceItem: true
+        case let workspace as WorkspaceItem: !isMissing(workspace)
         case let node as FileNode: node.isDirectory
+        case is DraftsGroupItem: !draftItems.isEmpty
         default: false
         }
     }
@@ -259,7 +304,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        (item as? FileNode)?.isDirectory == false
+        item is DraftItem || (item as? FileNode)?.isDirectory == false
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
@@ -270,9 +315,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         switch item {
         case let workspace as WorkspaceItem:
             let title = appState.workspace(id: workspace.id)?.displayName ?? ""
-            return groupCell(title: title)
+            return isMissing(workspace)
+                ? groupCell(title: title + " (không tìm thấy)", dimmed: true)
+                : groupCell(title: title)
         case is DraftsGroupItem:
             return groupCell(title: Self.draftsTitle)
+        case let draft as DraftItem:
+            let cell = makeCell(identifier: SidebarCellView.fileIdentifier)
+            cell.configure(name: appState.drafts.first { $0.id == draft.id }?.title ?? "", isDirectory: false)
+            return cell
         case let node as FileNode:
             let cell = makeCell(identifier: SidebarCellView.fileIdentifier)
             cell.configure(name: node.name, isDirectory: node.isDirectory)
@@ -311,9 +362,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         }
     }
 
-    private func groupCell(title: String) -> SidebarCellView {
+    private func groupCell(title: String, dimmed: Bool = false) -> SidebarCellView {
         let cell = makeCell(identifier: SidebarCellView.groupIdentifier)
-        cell.configureGroup(title: title)
+        cell.configureGroup(title: title, dimmed: dimmed)
         return cell
     }
 
@@ -386,8 +437,9 @@ private final class SidebarCellView: NSTableCellView {
         fatalError("init(coder:) không dùng")
     }
 
-    func configureGroup(title: String) {
+    func configureGroup(title: String, dimmed: Bool) {
         label.stringValue = title
+        label.textColor = dimmed ? Theme.textMuted.withAlphaComponent(0.5) : Theme.textMuted
     }
 
     func configure(name: String, isDirectory: Bool) {

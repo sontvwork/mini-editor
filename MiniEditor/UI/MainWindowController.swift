@@ -2,26 +2,31 @@ import AppKit
 
 /// Cửa sổ chính: [sidebar | các cột editor] phía trên, thanh trạng thái dưới cùng.
 @MainActor
-final class MainWindowController: NSWindowController {
+final class MainWindowController: NSWindowController, NSWindowDelegate {
     static let defaultSidebarWidth: CGFloat = 240
     static let minimumSidebarWidth: CGFloat = 160
+    static let defaultFrame = NSRect(x: 100, y: 100, width: 1400, height: 860)
 
     private let appState: AppState
+    private let sessionStore: SessionStore
     private let sidebar: SidebarViewController
     private let columns: ColumnsViewController
     private let statusBar = StatusBarView()
     private let splitViewController = NSSplitViewController()
     private let sidebarItem: NSSplitViewItem
     private var directoryWatcher: DirectoryWatcher?
+    /// Độ rộng sidebar lần cuối khi còn hiện (để lưu session khi đang ẩn).
+    private var lastSidebarWidth = MainWindowController.defaultSidebarWidth
 
-    init(appState: AppState) {
+    init(appState: AppState, sessionStore: SessionStore, restoring session: Session?) {
         self.appState = appState
+        self.sessionStore = sessionStore
         sidebar = SidebarViewController(appState: appState)
         columns = ColumnsViewController(appState: appState)
         sidebarItem = NSSplitViewItem(viewController: sidebar)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 1400, height: 860),
+            contentRect: Self.defaultFrame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -34,10 +39,16 @@ final class MainWindowController: NSWindowController {
         super.init(window: window)
 
         buildContent(in: window)
+        restoreWindowLayout(session, in: window)
         bindState()
-
-        window.center()
         columns.apply()
+        if let ratios = session?.columns.map(\.widthRatio) {
+            columns.applyColumnWidthRatios(ratios)
+        }
+        sidebar.highlight(appState.activeBuffer?.id)
+        updateStatusBar()
+        window.delegate = self
+        sessionStore.provider = { [weak self] in self?.makeSession() }
     }
 
     @available(*, unavailable)
@@ -68,9 +79,29 @@ final class MainWindowController: NSWindowController {
         do {
             try appState.openFile(url)
         } catch {
-            sidebar.highlightFile(appState.activeBuffer?.id.fileURL)
-            guard let window else { return }
-            NSAlert(error: error).beginSheetModal(for: window)
+            sidebar.highlight(appState.activeBuffer?.id)
+            showError(error)
+        }
+    }
+
+    /// ⌘N: nháp mới vào cột đang focus.
+    func newDraft() {
+        do {
+            try appState.newDraft()
+        } catch {
+            showError(error)
+        }
+    }
+
+    /// ⌘S: file thường → lưu ngay; nháp → Save As.
+    func saveActiveBuffer() {
+        guard let buffer = appState.activeBuffer else { return }
+        switch buffer.id {
+        case .file:
+            guard !buffer.isReadOnly else { return NSSound.beep() }
+            appState.saveNow(buffer)
+        case let .draft(id):
+            showSavePanel(forDraft: id, buffer: buffer)
         }
     }
 
@@ -79,11 +110,70 @@ final class MainWindowController: NSWindowController {
         sidebarItem.animator().isCollapsed = !sidebarItem.isCollapsed
     }
 
+    /// Ghi trạng thái hiển thị hiện tại vào buffer rồi tạo session.
+    func makeSession() -> Session {
+        columns.saveDisplayedStates()
+        if !sidebarItem.isCollapsed, sidebar.view.frame.width > 0 {
+            lastSidebarWidth = sidebar.view.frame.width
+        }
+        let state = AppState.WindowLayoutState(
+            window: window.map { Session.WindowState(frame: NSStringFromRect($0.frame)) },
+            sidebar: Session.SidebarState(visible: !sidebarItem.isCollapsed, width: Double(lastSidebarWidth)),
+            columnWidthRatios: columns.columnWidthRatios()
+        )
+        return appState.makeSession(window: state)
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowDidMove(_ notification: Notification) {
+        appState.markSessionDirty()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        appState.markSessionDirty()
+    }
+
     // MARK: - Private
+
+    private func showSavePanel(forDraft id: UUID, buffer: Buffer) {
+        guard let window else { return }
+        let panel = NSSavePanel()
+        let ext = switch buffer.language {
+        case .bash: "sh"
+        case .markdown: "md"
+        case .plain: "txt"
+        }
+        panel.nameFieldStringValue = "\(buffer.draftTitle).\(ext)"
+        if let workspace = appState.focusedWorkspace, !workspace.isMissing {
+            panel.directoryURL = workspace.url
+        }
+        Task { @MainActor in
+            guard await panel.beginSheetModal(for: window) == .OK, let url = panel.url else { return }
+            do {
+                try appState.saveDraft(id, to: url)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    private func showError(_ error: Error) {
+        guard let window else { return }
+        NSAlert(error: error).beginSheetModal(for: window)
+    }
+
+    private func updateStatusBar() {
+        let buffer = appState.activeBuffer
+        statusBar.setSaveState(buffer?.saveState, isReadOnly: buffer?.isReadOnly ?? false)
+    }
 
     private func bindState() {
         columns.onCursorChange = { [weak self] line, column in
             self?.statusBar.setCursor(line: line, column: column)
+        }
+        columns.onViewStateChange = { [weak self] in
+            self?.appState.markSessionDirty()
         }
         appState.onFontSizeChange = { [weak self] size in
             self?.columns.setFontSize(size)
@@ -92,9 +182,27 @@ final class MainWindowController: NSWindowController {
         appState.onLayoutChange = { [weak self] in
             guard let self else { return }
             self.columns.apply()
-            self.sidebar.highlightFile(self.appState.activeBuffer?.id.fileURL)
+            self.sidebar.highlight(self.appState.activeBuffer?.id)
+            self.updateStatusBar()
+        }
+        appState.onBufferStatusChange = { [weak self] buffer in
+            self?.columns.refreshBanner(for: buffer)
+            self?.updateStatusBar()
+        }
+        appState.onDraftsChange = { [weak self] in
+            self?.sidebar.reloadDrafts()
+        }
+        appState.onSessionDirty = { [weak self] in
+            self?.sessionStore.scheduleSave()
         }
         sidebar.onOpenFile = { [weak self] url in self?.openFile(url) }
+        sidebar.onOpenDraft = { [weak self] id in
+            do {
+                try self?.appState.openDraft(id)
+            } catch {
+                self?.showError(error)
+            }
+        }
         appState.onWorkspacesChange = { [weak self] in
             self?.sidebar.reloadWorkspaces()
             self?.updateWatchedDirectories()
@@ -102,12 +210,23 @@ final class MainWindowController: NSWindowController {
         directoryWatcher = DirectoryWatcher { [weak self] changes in
             self?.sidebar.applyDirectoryChanges(changes)
         }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(outerSplitViewDidResize),
+            name: NSSplitView.didResizeSubviewsNotification, object: splitViewController.splitView
+        )
         statusBar.setFontSize(appState.fontSize)
         updateWatchedDirectories()
     }
 
+    @objc private func outerSplitViewDidResize() {
+        if !sidebarItem.isCollapsed, sidebar.view.frame.width > 0 {
+            lastSidebarWidth = sidebar.view.frame.width
+        }
+        appState.markSessionDirty()
+    }
+
     private func updateWatchedDirectories() {
-        directoryWatcher?.watch(paths: appState.workspaces.map { $0.url.path })
+        directoryWatcher?.watch(paths: appState.workspaces.filter { !$0.isMissing }.map { $0.url.path })
     }
 
     private func buildContent(in window: NSWindow) {
@@ -128,9 +247,26 @@ final class MainWindowController: NSWindowController {
 
         let root = RootViewController(main: splitViewController, statusBar: statusBar)
         window.contentViewController = root
-        window.setContentSize(NSSize(width: 1400, height: 860))
-        root.view.layoutSubtreeIfNeeded()
-        splitView.setPosition(Self.defaultSidebarWidth, ofDividerAt: 0)
+    }
+
+    /// Khung cửa sổ và sidebar từ session (không có thì dùng mặc định).
+    private func restoreWindowLayout(_ session: Session?, in window: NSWindow) {
+        let savedFrame = session?.window.map { NSRectFromString($0.frame) } ?? .zero
+        let onScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(savedFrame) }
+        if savedFrame.width >= window.minSize.width, savedFrame.height >= window.minSize.height, onScreen {
+            window.setFrame(savedFrame, display: false)
+        } else {
+            window.setFrame(Self.defaultFrame, display: false)
+            window.center()
+        }
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        let width = session.map { CGFloat($0.sidebar.width) } ?? Self.defaultSidebarWidth
+        lastSidebarWidth = max(width, Self.minimumSidebarWidth)
+        splitViewController.splitView.setPosition(lastSidebarWidth, ofDividerAt: 0)
+        if session?.sidebar.visible == false {
+            sidebarItem.isCollapsed = true
+        }
     }
 }
 

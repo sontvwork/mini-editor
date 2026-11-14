@@ -20,6 +20,10 @@ enum Theme {
     static let syntaxVariable = color(0x79B8FF)
     /// Hiển thị đậm.
     static let syntaxHeading = color(0x79B8FF)
+    /// Nền banner lỗi (lỗi lưu file) — SPEC §3.4 "banner đỏ".
+    static let bannerError = color(0x6B2B2B)
+    /// Nền banner cảnh báo (file chỉ đọc vì không phải UTF-8).
+    static let bannerWarning = color(0x5A4A1E)
 
     private static func color(_ hex: UInt32) -> NSColor {
         NSColor(
