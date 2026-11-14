@@ -8,9 +8,12 @@ final class CodeTextView: NSTextView {
     private var cachedLineIndex: LineIndex?
 
     private(set) var editorFont: NSFont = EditorFont.font(ofSize: FontSize.default)
+    private var attributes: [NSAttributedString.Key: Any] = [:]
 
     /// Gọi sau mỗi lần nội dung thay đổi (gõ phím hoặc sửa storage bằng code).
     var onTextStorageEdit: (() -> Void)?
+    /// Gọi khi text view nhận focus bàn phím (để biết cột nào đang focus).
+    var onBecomeFirstResponder: (() -> Void)?
 
     /// Dựng đủ chuỗi TextKit 1: storage → layout manager → container → view.
     static func make(fontSize: CGFloat) -> CodeTextView {
@@ -67,18 +70,31 @@ final class CodeTextView: NSTextView {
         paragraph.minimumLineHeight = lineHeight
         paragraph.maximumLineHeight = lineHeight
 
-        let attributes: [NSAttributedString.Key: Any] = [
+        attributes = [
             .font: font,
             .foregroundColor: Theme.text,
             .paragraphStyle: paragraph,
         ]
         defaultParagraphStyle = paragraph
-        typingAttributes = attributes
-        if let storage = textStorage, storage.length > 0 {
-            storage.beginEditing()
-            storage.setAttributes(attributes, range: NSRange(location: 0, length: storage.length))
-            storage.endEditing()
+        applyAttributesToStorage()
+    }
+
+    /// Gắn storage của buffer khác vào view (chuyển tab). Không tạo lại view.
+    func attach(_ storage: NSTextStorage) {
+        guard let layoutManager, storage !== textStorage else { return }
+        if let old = textStorage {
+            NotificationCenter.default.removeObserver(self, name: NSTextStorage.didProcessEditingNotification, object: old)
         }
+        layoutManager.replaceTextStorage(storage)
+        observe(storage)
+        cachedLineIndex = nil
+        applyAttributesToStorage()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onBecomeFirstResponder?() }
+        return accepted
     }
 
     // MARK: - Private
@@ -121,14 +137,26 @@ final class CodeTextView: NSTextView {
         minSize = .zero
         maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
-        if let textStorage {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(storageDidProcessEditing(_:)),
-                name: NSTextStorage.didProcessEditingNotification,
-                object: textStorage
-            )
-        }
+        if let textStorage { observe(textStorage) }
+    }
+
+    private func observe(_ storage: NSTextStorage) {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(storageDidProcessEditing(_:)),
+            name: NSTextStorage.didProcessEditingNotification,
+            object: storage
+        )
+    }
+
+    /// Font/màu/paragraph cho toàn bộ storage hiện tại và cho chữ sắp gõ.
+    /// Sửa thẳng storage nên không ghi vào undo.
+    private func applyAttributesToStorage() {
+        typingAttributes = attributes
+        guard let storage = textStorage, storage.length > 0 else { return }
+        storage.beginEditing()
+        storage.setAttributes(attributes, range: NSRange(location: 0, length: storage.length))
+        storage.endEditing()
     }
 
     @objc private func storageDidProcessEditing(_ notification: Notification) {

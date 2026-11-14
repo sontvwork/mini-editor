@@ -1,7 +1,6 @@
 import AppKit
 
-/// Cửa sổ chính: [sidebar | editor] phía trên, thanh trạng thái dưới cùng.
-/// (Nhiều cột editor ở M3.)
+/// Cửa sổ chính: [sidebar | các cột editor] phía trên, thanh trạng thái dưới cùng.
 @MainActor
 final class MainWindowController: NSWindowController {
     static let defaultSidebarWidth: CGFloat = 240
@@ -9,7 +8,7 @@ final class MainWindowController: NSWindowController {
 
     private let appState: AppState
     private let sidebar: SidebarViewController
-    private let editor: EditorColumnView
+    private let columns: ColumnsViewController
     private let statusBar = StatusBarView()
     private let splitViewController = NSSplitViewController()
     private let sidebarItem: NSSplitViewItem
@@ -18,7 +17,7 @@ final class MainWindowController: NSWindowController {
     init(appState: AppState) {
         self.appState = appState
         sidebar = SidebarViewController(appState: appState)
-        editor = EditorColumnView(fontSize: appState.fontSize)
+        columns = ColumnsViewController(appState: appState)
         sidebarItem = NSSplitViewItem(viewController: sidebar)
 
         let window = NSWindow(
@@ -31,13 +30,14 @@ final class MainWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.backgroundColor = Theme.chromeBackground
         window.minSize = NSSize(width: 480, height: 320)
+        window.tabbingMode = .disallowed
         super.init(window: window)
 
         buildContent(in: window)
         bindState()
 
         window.center()
-        window.makeFirstResponder(editor.textView)
+        columns.apply()
     }
 
     @available(*, unavailable)
@@ -63,6 +63,17 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    /// Mở file thành tab (click trên sidebar). Lỗi đọc file → báo lỗi.
+    func openFile(_ url: URL) {
+        do {
+            try appState.openFile(url)
+        } catch {
+            sidebar.highlightFile(appState.activeBuffer?.id.fileURL)
+            guard let window else { return }
+            NSAlert(error: error).beginSheetModal(for: window)
+        }
+    }
+
     /// ⌘B: ẩn/hiện sidebar.
     func toggleSidebar() {
         sidebarItem.animator().isCollapsed = !sidebarItem.isCollapsed
@@ -71,13 +82,19 @@ final class MainWindowController: NSWindowController {
     // MARK: - Private
 
     private func bindState() {
-        editor.onCursorChange = { [weak self] line, column in
+        columns.onCursorChange = { [weak self] line, column in
             self?.statusBar.setCursor(line: line, column: column)
         }
         appState.onFontSizeChange = { [weak self] size in
-            self?.editor.setFontSize(size)
+            self?.columns.setFontSize(size)
             self?.statusBar.setFontSize(size)
         }
+        appState.onLayoutChange = { [weak self] in
+            guard let self else { return }
+            self.columns.apply()
+            self.sidebar.highlightFile(self.appState.activeBuffer?.id.fileURL)
+        }
+        sidebar.onOpenFile = { [weak self] url in self?.openFile(url) }
         appState.onWorkspacesChange = { [weak self] in
             self?.sidebar.reloadWorkspaces()
             self?.updateWatchedDirectories()
@@ -86,7 +103,6 @@ final class MainWindowController: NSWindowController {
             self?.sidebar.applyDirectoryChanges(changes)
         }
         statusBar.setFontSize(appState.fontSize)
-        editor.notifyCursor()
         updateWatchedDirectories()
     }
 
@@ -104,10 +120,8 @@ final class MainWindowController: NSWindowController {
         sidebarItem.minimumThickness = Self.minimumSidebarWidth
         sidebarItem.holdingPriority = NSLayoutConstraint.Priority(260)
 
-        let editorController = NSViewController()
-        editorController.view = editor
-        let editorItem = NSSplitViewItem(viewController: editorController)
-        editorItem.minimumThickness = 200
+        let editorItem = NSSplitViewItem(viewController: columns)
+        editorItem.minimumThickness = ColumnsViewController.minimumColumnWidth
 
         splitViewController.addSplitViewItem(sidebarItem)
         splitViewController.addSplitViewItem(editorItem)
@@ -118,12 +132,6 @@ final class MainWindowController: NSWindowController {
         root.view.layoutSubtreeIfNeeded()
         splitView.setPosition(Self.defaultSidebarWidth, ofDividerAt: 0)
     }
-}
-
-/// Thanh chia màu `Theme.border`.
-@MainActor
-private final class ThemedSplitView: NSSplitView {
-    override var dividerColor: NSColor { Theme.border }
 }
 
 /// Nội dung cửa sổ: split view controller phía trên, thanh trạng thái phía dưới.

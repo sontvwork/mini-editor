@@ -30,8 +30,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let draftsItem = DraftsGroupItem()
     /// Đang tự mở lại các thư mục → không ghi ngược trạng thái vào AppState.
     private var isRestoringExpansion = false
+    /// File đang active trong cột đang focus (được highlight).
+    private var highlightedURL: URL?
 
-    /// Click 1 lần vào file. (Mở file thành tab có từ M3.)
+    /// Click 1 lần vào file.
     var onOpenFile: ((URL) -> Void)?
 
     init(appState: AppState) {
@@ -108,6 +110,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 restoreExpansion(below: item.root, in: item)
             }
         }
+        applyHighlight()
+    }
+
+    /// Highlight file đang active trong cột đang focus (`nil` = bỏ highlight).
+    /// Chỉ chọn dòng đang hiện, không tự mở thư mục cha.
+    func highlightFile(_ url: URL?) {
+        highlightedURL = url?.standardizedFileURL
+        applyHighlight()
     }
 
     /// Đọc lại các thư mục đã nạp mà FSEvents báo có thay đổi.
@@ -144,6 +154,30 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         withRestoringExpansion {
             restoreExpansion(below: node, in: item)
         }
+        applyHighlight()
+    }
+
+    private func applyHighlight() {
+        guard let url = highlightedURL, let node = visibleNode(for: url) else {
+            outlineView.deselectAll(nil)
+            return
+        }
+        let row = outlineView.row(forItem: node)
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        outlineView.scrollRowToVisible(row)
+    }
+
+    /// Nút đang hiện trên outline ứng với file (workspace lồng nhau → workspace sâu nhất).
+    private func visibleNode(for url: URL) -> FileNode? {
+        let path = url.path
+        let candidates = workspaceItems.compactMap { item -> (Int, FileNode)? in
+            let root = item.root.url.standardizedFileURL.path
+            guard path.hasPrefix(root + "/"),
+                  let node = item.root.loadedDescendant(atRelativePath: String(path.dropFirst(root.count + 1))),
+                  outlineView.row(forItem: node) >= 0 else { return nil }
+            return (root.count, node)
+        }
+        return candidates.max { $0.0 < $1.0 }?.1
     }
 
     /// Tìm nút đã nạp ứng với đường dẫn thật FSEvents báo về.
@@ -225,7 +259,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is FileNode
+        (item as? FileNode)?.isDirectory == false
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
@@ -261,6 +295,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         default:
             break
         }
+        if !isRestoringExpansion { applyHighlight() }
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {

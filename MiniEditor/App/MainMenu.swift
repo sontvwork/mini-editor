@@ -46,6 +46,10 @@ enum MainMenu {
         menu.addItem(withTitle: "Add Workspace…",
                      action: #selector(AppDelegate.addWorkspace(_:)),
                      keyEquivalent: "o")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Close Tab",
+                     action: #selector(AppDelegate.closeEditorTab(_:)),
+                     keyEquivalent: "w")
         return menu
     }
 
@@ -90,6 +94,22 @@ enum MainMenu {
         let menu = NSMenu(title: "Window")
         menu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         menu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        let next = menu.addItem(withTitle: "Next Tab",
+                                action: #selector(AppDelegate.selectNextEditorTab(_:)),
+                                keyEquivalent: "\t")
+        next.keyEquivalentModifierMask = [.control]
+        let previous = menu.addItem(withTitle: "Previous Tab",
+                                    action: #selector(AppDelegate.selectPreviousEditorTab(_:)),
+                                    keyEquivalent: "\t")
+        previous.keyEquivalentModifierMask = [.control, .shift]
+        menu.addItem(.separator())
+        for number in 1...9 {
+            let item = menu.addItem(withTitle: "Focus Column \(number)",
+                                    action: #selector(AppDelegate.focusEditorColumn(_:)),
+                                    keyEquivalent: "\(number)")
+            item.tag = number - 1
+        }
         return menu
     }
 }

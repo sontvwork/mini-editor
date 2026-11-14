@@ -6,6 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Tab của app là tab editor; tắt window tabbing của hệ thống (nó cũng chiếm ⌃Tab).
+        NSWindow.allowsAutomaticWindowTabbing = false
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.mainMenu = MainMenu.build()
     }
@@ -29,6 +31,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleWorkspaceSidebar(_ sender: Any?) {
         windowController?.toggleSidebar()
+    }
+
+    // MARK: - Tab & cột
+
+    @objc func closeEditorTab(_ sender: Any?) {
+        appState.closeActiveTab()
+    }
+
+    @objc func selectNextEditorTab(_ sender: Any?) {
+        appState.selectNextTab()
+    }
+
+    @objc func selectPreviousEditorTab(_ sender: Any?) {
+        appState.selectPreviousTab()
+    }
+
+    /// ⌘1…⌘9: `tag` của menu item là chỉ số cột (0-based).
+    @objc func focusEditorColumn(_ sender: NSMenuItem) {
+        appState.focusColumn(at: sender.tag)
     }
 
     // MARK: - Cỡ chữ (⌘+ / ⌘− / ⌘0)
