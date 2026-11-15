@@ -88,6 +88,11 @@ final class ColumnsViewController: NSViewController {
         columnViews.values.filter { $0.displayedBuffer === buffer }.forEach { $0.refreshBanner() }
     }
 
+    /// Buffer vừa được nạp lại từ đĩa → cột đang hiện nó áp lại con trỏ/cuộn.
+    func bufferDidReload(_ buffer: Buffer) {
+        columnViews.values.filter { $0.displayedBuffer === buffer }.forEach { $0.bufferDidReload() }
+    }
+
     /// Ghi vị trí con trỏ/cuộn hiện tại vào các buffer đang hiện.
     func saveDisplayedStates() {
         columnViews.values.forEach { $0.saveDisplayedState() }
@@ -135,6 +140,14 @@ final class ColumnsViewController: NSViewController {
         view.onSelectTab = { [weak self] buffer in self?.appState.activateTab(buffer) }
         view.onCloseTab = { [weak self] buffer in self?.appState.closeTab(buffer) }
         view.onViewStateChange = { [weak self] in self?.onViewStateChange?() }
+        view.onBannerAction = { [weak self] action, buffer in
+            guard let self else { return }
+            switch action {
+            case .reloadFromDisk: self.appState.reloadFromDisk(buffer)
+            case .keepMine: self.appState.keepMine(buffer)
+            case .closeTab: self.appState.closeTab(buffer.id, discardingChanges: true)
+            }
+        }
         view.onCursorChange = { [weak self] line, column in
             guard let self, self.appState.layout.focusedColumn.id == id else { return }
             self.onCursorChange?(line, column)

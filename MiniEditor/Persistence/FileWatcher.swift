@@ -3,7 +3,8 @@ import Foundation
 
 /// Các thư mục có thay đổi, gom lại sau debounce.
 struct DirectoryChanges: Equatable {
-    /// Đường dẫn thật (đã resolve symlink, không có `/` cuối) của các thư mục có con bị thêm/xoá/đổi tên.
+    /// Đường dẫn thật (đã resolve symlink, không có `/` cuối) của các thư mục có con bị thêm/xoá/đổi tên
+    /// (chế độ `fileEvents`: của từng file bị đổi).
     var paths: Set<String> = []
     /// Thư mục mà FSEvents yêu cầu quét lại toàn bộ cây con.
     var recursivePaths: Set<String> = []
@@ -11,18 +12,22 @@ struct DirectoryChanges: Equatable {
     var isEmpty: Bool { paths.isEmpty && recursivePaths.isEmpty }
 }
 
-/// Theo dõi cây thư mục của các workspace bằng FSEvents, debounce 200ms (SPEC §3.1).
-/// Không có timer chạy liên tục: chỉ chạy khi có sự kiện.
+/// Theo dõi thư mục bằng FSEvents, gom sự kiện sau debounce. Không có timer chạy liên tục.
+/// - Mặc định: báo thư mục có con bị thêm/xoá/đổi tên (cây workspace, debounce 200ms, SPEC §3.1).
+/// - `fileEvents: true`: báo đường dẫn từng file bị đổi (file đang mở, SPEC §3.6).
 @MainActor
 final class DirectoryWatcher {
-    static let debounce: Duration = .milliseconds(200)
-
+    private let debounce: Duration
+    private let fileEvents: Bool
     private let onChange: (DirectoryChanges) -> Void
     private var stream: FSEventStreamRef?
     private var pending = DirectoryChanges()
     private var debounceTask: Task<Void, Never>?
 
-    init(onChange: @escaping (DirectoryChanges) -> Void) {
+    init(debounce: Duration = .milliseconds(200), fileEvents: Bool = false,
+         onChange: @escaping (DirectoryChanges) -> Void) {
+        self.debounce = debounce
+        self.fileEvents = fileEvents
         self.onChange = onChange
     }
 
@@ -52,7 +57,10 @@ final class DirectoryWatcher {
                 watcher.receive(paths: paths, flags: flags)
             }
         }
-        let flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagWatchRoot)
+        var flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagWatchRoot)
+        if fileEvents {
+            flags |= FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents)
+        }
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
             callback,
@@ -101,8 +109,8 @@ final class DirectoryWatcher {
             }
         }
         debounceTask?.cancel()
-        debounceTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.debounce)
+        debounceTask = Task { [weak self, debounce] in
+            try? await Task.sleep(for: debounce)
             guard !Task.isCancelled else { return }
             self?.flush()
         }

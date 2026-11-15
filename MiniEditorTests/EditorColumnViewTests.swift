@@ -67,4 +67,26 @@ final class EditorColumnViewTests: XCTestCase {
         view.show(nil)
         XCTAssertFalse(view.textView.isEditable)
     }
+
+    func testExternalChangeBannerShowsButtonsAndReportsActions() throws {
+        let view = EditorColumnView(columnID: UUID(), fontSize: 13)
+        let buffer = makeBuffer("x")
+        buffer.externalChange = .modified
+        var actions: [EditorColumnView.BannerAction] = []
+        view.onBannerAction = { action, _ in actions.append(action) }
+        view.show(buffer)
+        XCTAssertFalse(view.banner.isHidden)
+        XCTAssertEqual(view.banner.buttonTitles, ["Nạp bản trên đĩa", "Giữ bản của tôi"])
+
+        buffer.externalChange = .deleted
+        view.refreshBanner()
+        XCTAssertEqual(view.banner.buttonTitles, ["Lưu lại", "Đóng tab"])
+        let buttons = view.banner.subviews.flatMap(\.subviews).compactMap { $0 as? NSButton }
+        buttons.forEach { $0.performClick(nil) }
+        XCTAssertEqual(actions, [.keepMine, .closeTab])
+
+        buffer.externalChange = nil
+        view.refreshBanner()
+        XCTAssertTrue(view.banner.isHidden)
+    }
 }

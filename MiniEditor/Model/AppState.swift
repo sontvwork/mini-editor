@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Nguồn sự thật duy nhất cho UI.
@@ -23,6 +24,8 @@ final class AppState {
     var onFontSizeChange: ((CGFloat) -> Void)?
     /// Gọi khi trạng thái lưu của một buffer đổi.
     var onBufferStatusChange: ((Buffer) -> Void)?
+    /// Gọi khi nội dung buffer được nạp lại từ đĩa (file bị sửa bên ngoài).
+    var onBufferReload: ((Buffer) -> Void)?
     /// Có gì đó cần ghi vào session.json.
     var onSessionDirty: (() -> Void)?
 
@@ -32,6 +35,9 @@ final class AppState {
         autosave = AutosaveService(draftStore: draftStore)
         autosave.onStatusChange = { [weak self] buffer in
             self?.onBufferStatusChange?(buffer)
+        }
+        autosave.onReload = { [weak self] buffer in
+            self?.onBufferReload?(buffer)
         }
     }
 
@@ -119,11 +125,16 @@ final class AppState {
     }
 
     /// Đóng tab. Không bao giờ hỏi lưu: nội dung được lưu ngay trước khi đóng.
-    /// Lưu lỗi → giữ tab lại (nội dung còn trong RAM, banner báo lỗi).
-    func closeTab(_ id: BufferID) {
+    /// Lưu lỗi (hoặc đang tạm dừng vì file đổi bên ngoài) → giữ tab lại, nội dung còn trong RAM.
+    /// `discardingChanges`: đóng hẳn, bỏ thay đổi chưa lưu ([Đóng tab] trên banner file bị xoá).
+    func closeTab(_ id: BufferID, discardingChanges: Bool = false) {
         if let buffer = buffers[id] {
-            autosave.save(buffer)
-            if case .failed = buffer.saveState { return }
+            if discardingChanges {
+                autosave.cancel(buffer)
+            } else {
+                autosave.save(buffer)
+                if case .failed = buffer.saveState { return }
+            }
         }
         setLayout(ColumnLayoutEngine.close(id, in: layout))
     }
@@ -176,6 +187,30 @@ final class AppState {
         autosave.saveAll(buffers.values)
     }
 
+    // MARK: - Thay đổi từ bên ngoài
+
+    /// Thư mục (đường dẫn thật) chứa các file đang mở, để theo dõi bằng FSEvents.
+    var watchedDirectories: Set<String> {
+        Set(buffers.keys.compactMap { $0.fileURL.map { (Self.realPath(ofFile: $0) as NSString).deletingLastPathComponent } })
+    }
+
+    /// Kiểm tra lại các file đang mở có đường dẫn thật nằm trong `paths` (`nil` = kiểm tra tất cả).
+    func checkExternalChanges(paths: Set<String>?) {
+        for buffer in buffers.values {
+            guard let url = buffer.id.fileURL else { continue }
+            if let paths, !paths.contains(Self.realPath(ofFile: url)) { continue }
+            autosave.checkDisk(buffer)
+        }
+    }
+
+    func reloadFromDisk(_ buffer: Buffer) {
+        autosave.reloadFromDisk(buffer)
+    }
+
+    func keepMine(_ buffer: Buffer) {
+        autosave.keepMine(buffer)
+    }
+
     // MARK: - Nháp
 
     /// ⌘N: tạo nháp mới, mở vào cột đang focus.
@@ -214,10 +249,12 @@ final class AppState {
             // File đích đang mở ở tab khác: lưu và đóng tab đó trước khi ghi đè.
             closeTab(fileID)
         }
-        try autosave.writeData(TextFileCodec.encode(buffer.text, lineEnding: .lf), url)
+        let data = TextFileCodec.encode(buffer.text, lineEnding: .lf)
+        try autosave.writeData(data, url)
 
         autosave.cancel(buffer)
         buffer.becomeFile(url)
+        buffer.diskDigest = SHA256.hash(data: data)
         buffer.isDirty = false
         buffer.saveState = .saved
         buffers[.draft(id)] = nil
@@ -328,6 +365,14 @@ final class AppState {
     }
 
     // MARK: - Private
+
+    /// Đường dẫn thật của file như FSEvents báo (resolve symlink); file không còn thì resolve thư mục cha.
+    private static func realPath(ofFile url: URL) -> String {
+        if FileManager.default.fileExists(atPath: url.path) {
+            return DirectoryWatcher.realPath(url.path)
+        }
+        return DirectoryWatcher.realPath(url.deletingLastPathComponent().path) + "/" + url.lastPathComponent
+    }
 
     /// Dựng tab từ session và nạp buffer nếu file/nháp còn đọc được.
     private func restoreTab(_ saved: Session.TabState) -> Tab {

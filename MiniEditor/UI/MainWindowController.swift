@@ -15,6 +15,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let splitViewController = NSSplitViewController()
     private let sidebarItem: NSSplitViewItem
     private var directoryWatcher: DirectoryWatcher?
+    /// Theo dõi file đang mở (FSEvents trên thư mục chứa chúng).
+    private var openFileWatcher: DirectoryWatcher?
+    private var watchedFileDirectories: Set<String> = []
     /// Độ rộng sidebar lần cuối khi còn hiện (để lưu session khi đang ẩn).
     private var lastSidebarWidth = MainWindowController.defaultSidebarWidth
 
@@ -184,10 +187,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             self.columns.apply()
             self.sidebar.highlight(self.appState.activeBuffer?.id)
             self.updateStatusBar()
+            self.updateWatchedFiles()
         }
         appState.onBufferStatusChange = { [weak self] buffer in
             self?.columns.refreshBanner(for: buffer)
             self?.updateStatusBar()
+        }
+        appState.onBufferReload = { [weak self] buffer in
+            self?.columns.bufferDidReload(buffer)
         }
         appState.onDraftsChange = { [weak self] in
             self?.sidebar.reloadDrafts()
@@ -214,8 +221,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             self, selector: #selector(outerSplitViewDidResize),
             name: NSSplitView.didResizeSubviewsNotification, object: splitViewController.splitView
         )
+        openFileWatcher = DirectoryWatcher(debounce: .milliseconds(100), fileEvents: true) { [weak self] changes in
+            // Thư mục gốc bị đổi/cần quét lại → kiểm tra mọi file đang mở.
+            self?.appState.checkExternalChanges(paths: changes.recursivePaths.isEmpty ? changes.paths : nil)
+        }
         statusBar.setFontSize(appState.fontSize)
         updateWatchedDirectories()
+        updateWatchedFiles()
+    }
+
+    /// Chỉ dựng lại stream khi tập thư mục cần theo dõi đổi (không phải mỗi lần chuyển tab).
+    private func updateWatchedFiles() {
+        let directories = appState.watchedDirectories
+        guard directories != watchedFileDirectories else { return }
+        watchedFileDirectories = directories
+        openFileWatcher?.watch(paths: directories.sorted())
     }
 
     @objc private func outerSplitViewDidResize() {
