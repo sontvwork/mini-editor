@@ -133,7 +133,10 @@ final class CodeTextView: NSTextView {
         super.draw(dirtyRect)
     }
 
+    /// Cột trống (không chọn được) thì không nhận focus — tránh con trỏ nhấp nháy khi không có gì để gõ.
+    /// Chặn ở đây vì `makeFirstResponder` không hỏi `acceptsFirstResponder`.
     override func becomeFirstResponder() -> Bool {
+        guard isSelectable else { return false }
         let accepted = super.becomeFirstResponder()
         if accepted { onBecomeFirstResponder?() }
         return accepted

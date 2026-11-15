@@ -25,6 +25,8 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
     private(set) var displayedBuffer: Buffer?
     /// Đang đổi buffer → bỏ qua các thông báo con trỏ/cuộn do việc đổi storage sinh ra.
     private var isSwitchingBuffer = false
+    /// Đang bỏ/nhận lại focus để làm mới con trỏ → không coi là người dùng focus cột.
+    private var isRefreshingFocus = false
 
     /// Vị trí con trỏ đổi: (dòng, cột), 1-based.
     var onCursorChange: ((Int, Int) -> Void)?
@@ -77,7 +79,10 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
             self?.ruler.textDidChange()
             self?.notifyCursor()
         }
-        textView.onBecomeFirstResponder = { [weak self] in self?.onFocus?() }
+        textView.onBecomeFirstResponder = { [weak self] in
+            guard let self, !self.isRefreshingFocus else { return }
+            self.onFocus?()
+        }
         tabBar.onSelect = { [weak self] id in
             guard let self else { return }
             self.onSelectTab?(id)
@@ -195,13 +200,25 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
     /// Áp trạng thái của `displayedBuffer` lên text view. Gọi khi `isSwitchingBuffer == true`.
     private func applyBufferState() {
         let buffer = displayedBuffer
-        textView.isEditable = buffer.map { !$0.isReadOnly } ?? false
+        let wasEditable = textView.isEditable
+        let editable = buffer.map { !$0.isReadOnly } ?? false
+        textView.isEditable = editable
+        // Cột trống: không chọn/không focus được (không có gì để gõ).
+        textView.isSelectable = buffer != nil
         let length = textView.textStorage?.length ?? 0
         let selection = buffer?.selection ?? NSRange(location: 0, length: 0)
         let location = min(selection.location, length)
         textView.setSelectedRange(NSRange(location: location, length: min(selection.length, length - location)))
         restoreScroll(to: buffer?.scrollY ?? 0)
         isSwitchingBuffer = false
+        // Text view đang focus mà chuyển sang không sửa được: con trỏ (NSTextInsertionIndicator) không tự ẩn,
+        // cứ nhấp nháy ở vị trí cũ. Bỏ focus để AppKit ẩn nó; còn buffer (chỉ đọc) thì nhận focus lại.
+        if wasEditable, !editable, let window, window.firstResponder === textView {
+            isRefreshingFocus = true
+            window.makeFirstResponder(nil)
+            if buffer != nil { window.makeFirstResponder(textView) }
+            isRefreshingFocus = false
+        }
 
         ruler.textDidChange()
         refreshBanner()
