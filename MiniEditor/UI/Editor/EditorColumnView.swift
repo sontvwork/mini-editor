@@ -18,6 +18,8 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
     let textView: CodeTextView
     private let tabBar = TabBarView()
     let banner = BannerView()
+    /// Hiện thay vùng soạn thảo khi cột không có tab: ẩn số dòng, giữa cột chữ "Mini Editor" mờ.
+    let emptyView = EmptyColumnView()
     private let scrollView = NSScrollView()
     private let ruler: LineNumberRulerView
     /// Storage gắn vào khi cột không có tab nào.
@@ -56,13 +58,14 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
 
         super.init(frame: .zero)
 
-        let stack = NSStackView(views: [tabBar, banner, scrollView])
+        let stack = NSStackView(views: [tabBar, banner, scrollView, emptyView])
         stack.orientation = .vertical
         stack.spacing = 0
         stack.alignment = .width
         stack.distribution = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
         scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        emptyView.setContentHuggingPriority(.defaultLow, for: .vertical)
         addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: topAnchor),
@@ -71,6 +74,7 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
         banner.isHidden = true
+        scrollView.isHidden = true
 
         textView.delegate = self
         textView.attach(emptyStorage)
@@ -203,8 +207,11 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
         let wasEditable = textView.isEditable
         let editable = buffer.map { !$0.isReadOnly } ?? false
         textView.isEditable = editable
-        // Cột trống: không chọn/không focus được (không có gì để gõ).
+        // Cột trống: ẩn hẳn vùng soạn thảo (cả con trỏ có thể còn kẹt ở vị trí cũ — AppKit không tự ẩn
+        // NSTextInsertionIndicator khi text view mất focus qua menu chuột phải), không chọn/focus được.
         textView.isSelectable = buffer != nil
+        scrollView.isHidden = buffer == nil
+        emptyView.isHidden = buffer != nil
         let length = textView.textStorage?.length ?? 0
         let selection = buffer?.selection ?? NSRange(location: 0, length: 0)
         let location = min(selection.location, length)
@@ -253,6 +260,31 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
     /// Mỗi buffer có undo stack riêng, không lẫn khi chuyển tab.
     func undoManager(for view: NSTextView) -> UndoManager? {
         displayedBuffer?.undoManager
+    }
+}
+
+/// Nền editor với chữ "Mini Editor" mờ ở giữa (cột không có tab).
+@MainActor
+final class EmptyColumnView: NSView {
+    let label = NSTextField(labelWithString: "Mini Editor")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.editorBackground.cgColor
+        label.font = NSFont.systemFont(ofSize: 28, weight: .light)
+        label.textColor = Theme.emptyStateText
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) không dùng")
     }
 }
 

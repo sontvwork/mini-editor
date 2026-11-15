@@ -81,12 +81,17 @@ final class EditorColumnViewTests: XCTestCase {
         focusEvents = 0
 
         view.show(nil)
+        XCTAssertTrue(view.textView.enclosingScrollView!.isHidden, "ẩn cả vùng soạn thảo lẫn số dòng và con trỏ kẹt")
+        XCTAssertFalse(view.emptyView.isHidden)
+        XCTAssertEqual(view.emptyView.label.stringValue, "Mini Editor")
         XCTAssertFalse(window.firstResponder === view.textView, "bỏ focus để con trỏ cũ biến mất")
         XCTAssertFalse(view.textView.isSelectable)
         window.makeFirstResponder(view.textView) // như ColumnsViewController trả focus về cột đang focus
         XCTAssertFalse(window.firstResponder === view.textView, "cột trống không nhận focus")
 
         view.show(makeBuffer("b"))
+        XCTAssertFalse(view.textView.enclosingScrollView!.isHidden)
+        XCTAssertTrue(view.emptyView.isHidden)
         XCTAssertTrue(view.textView.isSelectable)
         XCTAssertTrue(window.makeFirstResponder(view.textView))
 

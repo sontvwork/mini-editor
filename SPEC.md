@@ -79,6 +79,7 @@ Logic trên phải nằm trong một kiểu **thuần (pure)**, không phụ thu
 - Có nút × trên tab. ⌘W đóng tab đang active. ⌃Tab / ⌃⇧Tab chuyển tab trong cột.
 - Đóng tab **không bao giờ hỏi lưu**, vì nội dung luôn đã được tự lưu.
 - Không có tab xem trước (preview tab), không kéo tab giữa các cột.
+- Cột không có tab nào: ẩn vùng soạn thảo và số dòng, giữa cột hiện chữ "Mini Editor" mờ.
 
 ### 3.4 Tự động lưu
 

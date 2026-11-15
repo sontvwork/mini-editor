@@ -20,6 +20,8 @@ enum Theme {
     static let syntaxVariable = color(0x79B8FF)
     /// Hiển thị đậm.
     static let syntaxHeading = color(0x79B8FF)
+    /// Chữ "Mini Editor" mờ giữa cột không có tab.
+    static let emptyStateText = textMuted.withAlphaComponent(0.35)
     /// Nền banner lỗi (lỗi lưu file) — SPEC §3.4 "banner đỏ".
     static let bannerError = color(0x6B2B2B)
     /// Nền banner cảnh báo (file chỉ đọc vì không phải UTF-8).
