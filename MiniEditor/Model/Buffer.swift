@@ -37,7 +37,9 @@ final class Buffer: NSObject {
     var saveState: SaveState = .saved
     /// Hash nội dung trên đĩa mà app biết lần cuối (lúc mở hoặc lần ghi gần nhất); `nil` = file không tồn tại.
     /// Dùng để nhận ra thay đổi do chính app ghi và phát hiện thay đổi từ bên ngoài.
-    var diskDigest: SHA256.Digest?
+    private(set) var diskDigest: SHA256.Digest?
+    /// Dấu vết file ứng với `diskDigest`, để bỏ qua việc đọc lại khi file không đổi.
+    private(set) var diskStamp: DiskStamp?
     var externalChange: ExternalChange?
     /// Đang thay nội dung bằng bản trên đĩa → không coi là người dùng sửa.
     private var isReloading = false
@@ -72,6 +74,7 @@ final class Buffer: NSObject {
 
     /// Đọc file: giữ kiểu xuống dòng; không phải UTF-8 → chỉ đọc.
     static func load(url: URL) throws -> Buffer {
+        let stamp = DiskStamp.of(url) // lấy trước khi đọc: file đổi giữa chừng thì lần kiểm tra sau sẽ thấy
         let data = try Data(contentsOf: url)
         let decoded = TextFileCodec.decode(data)
         let buffer = Buffer(id: .file(path: url),
@@ -80,8 +83,15 @@ final class Buffer: NSObject {
                             lineEnding: decoded.lineEnding,
                             language: Language.detect(fileName: url.lastPathComponent,
                                                       firstLine: Language.firstLine(of: decoded.text)))
-        buffer.diskDigest = SHA256.hash(data: data)
+        buffer.setDiskState(data, stamp: stamp)
         return buffer
+    }
+
+    /// Ghi nhận nội dung trên đĩa mà app biết (`nil` = file không tồn tại).
+    /// `stamp` lấy trước khi đọc, hoặc ngay sau khi app tự ghi; sai kích thước thì bỏ để lần sau đọc lại.
+    func setDiskState(_ data: Data?, stamp: DiskStamp?) {
+        diskDigest = data.map { SHA256.hash(data: $0) }
+        diskStamp = data.flatMap { data in stamp.flatMap { $0.size == Int64(data.count) ? $0 : nil } }
     }
 
     /// Thay nội dung bằng bản trên đĩa. Chỉ thay đoạn khác nhau để con trỏ và vùng tô màu

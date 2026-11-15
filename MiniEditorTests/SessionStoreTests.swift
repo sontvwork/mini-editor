@@ -135,3 +135,56 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotNil(store.load())
     }
 }
+
+@MainActor
+final class EdgeCaseTests: XCTestCase {
+    func testCorruptSessionIsBackedUpNotOverwritten() throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        try dir.makeFile("session.json", contents: "{ hỏng")
+        let store = SessionStore(fileURL: dir.url.appendingPathComponent("session.json"))
+        XCTAssertNil(store.load())
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.url.path)
+        XCTAssertFalse(files.contains("session.json"))
+        let backup = try XCTUnwrap(files.first { $0.hasPrefix("session.corrupt-") && $0.hasSuffix(".json") })
+        XCTAssertEqual(try String(contentsOf: dir.url.appendingPathComponent(backup), encoding: .utf8), "{ hỏng")
+    }
+
+    func testWorkspaceMissingStateFollowsDisk() throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        try dir.makeDirectory("ops")
+        let state = AppState()
+        let id = state.addWorkspace(url: dir.url.appendingPathComponent("ops"))
+        var changes = 0
+        state.onWorkspacesChange = { changes += 1 }
+
+        try FileManager.default.removeItem(at: dir.url.appendingPathComponent("ops"))
+        state.refreshMissingWorkspaces()
+        XCTAssertEqual(state.workspace(id: id)?.isMissing, true)
+
+        state.refreshMissingWorkspaces()
+        XCTAssertEqual(changes, 1, "không đổi thì không báo")
+
+        try dir.makeDirectory("ops")
+        state.refreshMissingWorkspaces()
+        XCTAssertEqual(state.workspace(id: id)?.isMissing, false)
+        XCTAssertEqual(changes, 2)
+    }
+
+    func testDiskStampRecordedOnLoadAndSave() throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        try dir.makeFile("a.sh", contents: "echo 1\n")
+        let url = dir.url.appendingPathComponent("a.sh")
+        let state = AppState(draftStore: DraftStore(directory: dir.url.appendingPathComponent("drafts")))
+        try state.openFile(url)
+        let buffer = try XCTUnwrap(state.buffers[.file(path: url)])
+        XCTAssertEqual(buffer.diskStamp, DiskStamp.of(url))
+
+        buffer.textStorage.append(NSAttributedString(string: "echo 2\n"))
+        state.saveNow(buffer)
+        XCTAssertEqual(buffer.diskStamp, DiskStamp.of(url), "sau khi tự ghi, dấu vết khớp → watcher bỏ qua mà không đọc file")
+        XCTAssertNotNil(buffer.diskStamp)
+    }
+}

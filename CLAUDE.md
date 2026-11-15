@@ -33,6 +33,8 @@ xcodebuild -project MiniEditor.xcodeproj -scheme MiniEditor -derivedDataPath bui
 open build/Build/Products/Debug/MiniEditor.app
 ```
 
+Đo hiệu năng (SPEC §7) không đụng session thật: `MINIEDITOR_SUPPORT_DIR=<thư mục có session.json mẫu> build/Build/Products/Release/MiniEditor.app/Contents/MacOS/MiniEditor`, rồi `footprint -p <pid>` / `top -pid <pid> -stats cpu,idlew`.
+
 ## Cách làm việc
 
 1. Mỗi phiên chỉ làm **một milestone** trong `SPEC.md` mục 8.
@@ -48,3 +50,6 @@ open build/Build/Products/Debug/MiniEditor.app
 - `Data.write(options: .atomic)` tạo file mới → mất quyền +x nếu không set lại.
 - Tự ghi file sẽ kích hoạt file watcher của chính mình → phải lọc thay đổi do app tự ghi.
 - Chuyển tab: đổi `NSTextStorage` của layout manager, đừng tạo lại `NSTextView` (tốn RAM, mất trạng thái find bar).
+- Không thêm/xoá temporary attributes bên trong `processEditing`/`didProcessEditing` (storage còn đang sửa → AppKit ném exception khi phải sinh glyph). Tính vùng ngay, áp màu sau (`SyntaxLayoutManager`).
+- Temporary attributes chỉ đổi được màu, không đổi font → đậm/nghiêng vẽ giả lập trong `SyntaxLayoutManager`.
+- Màn hình XDR: không đặt `window.colorSpace = .sRGB` thì vùng chữ dùng backing store half-float (8 byte/pixel), tốn thêm ~15MB RAM.

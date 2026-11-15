@@ -127,6 +127,12 @@ final class CodeTextView: NSTextView {
         }
     }
 
+    /// Tô màu lười: tô nốt phần sắp vẽ mà chưa được tô (SyntaxLayoutManager).
+    override func draw(_ dirtyRect: NSRect) {
+        (layoutManager as? SyntaxLayoutManager)?.ensureHighlighted(in: dirtyRect, of: self)
+        super.draw(dirtyRect)
+    }
+
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted { onBecomeFirstResponder?() }

@@ -54,7 +54,7 @@ final class AutosaveService {
                 guard checkDisk(buffer) else { return }
                 let data = TextFileCodec.encode(buffer.text, lineEnding: buffer.lineEnding)
                 try writeData(data, url)
-                buffer.diskDigest = SHA256.hash(data: data)
+                buffer.setDiskState(data, stamp: DiskStamp.of(url))
             case let .draft(id):
                 try FileManager.default.createDirectory(at: draftStore.directory, withIntermediateDirectories: true)
                 try writeData(Data(buffer.text.utf8), draftStore.url(for: id))
@@ -85,10 +85,14 @@ final class AutosaveService {
     @discardableResult
     func checkDisk(_ buffer: Buffer) -> Bool {
         guard case let .file(url) = buffer.id else { return true }
+        let stamp = DiskStamp.of(url)
+        // Đường nhanh: dấu vết file y như lần app biết → khỏi đọc cả file (gồm lần ghi của chính app).
+        if buffer.externalChange == nil, let stamp, stamp == buffer.diskStamp { return true }
         let data = try? Data(contentsOf: url)
         // Có file nhưng không đọc được (mất quyền…): để lần ghi báo lỗi.
         if data == nil, FileManager.default.fileExists(atPath: url.path) { return true }
         if data.map({ SHA256.hash(data: $0) }) == buffer.diskDigest {
+            buffer.setDiskState(data, stamp: stamp)
             if buffer.externalChange != nil {
                 // Đĩa quay về đúng bản app biết (vd. bị xoá rồi tạo lại y hệt).
                 buffer.externalChange = nil
@@ -99,7 +103,7 @@ final class AutosaveService {
         }
         cancel(buffer)
         if let data, !buffer.isDirty {
-            apply(data, to: buffer)
+            apply(data, stamp: stamp, to: buffer)
         } else {
             buffer.externalChange = data == nil ? .deleted : .modified
             if buffer.isDirty { setState(.failed(Self.pausedMessage), of: buffer) }
@@ -111,7 +115,8 @@ final class AutosaveService {
     /// [Giữ bản của tôi] / [Lưu lại]: lấy trạng thái đĩa hiện tại làm mốc rồi ghi đè bằng nội dung trong app.
     func keepMine(_ buffer: Buffer) {
         guard case let .file(url) = buffer.id else { return }
-        buffer.diskDigest = (try? Data(contentsOf: url)).map { SHA256.hash(data: $0) }
+        let stamp = DiskStamp.of(url)
+        buffer.setDiskState(try? Data(contentsOf: url), stamp: stamp)
         buffer.externalChange = nil
         buffer.isDirty = true
         save(buffer)
@@ -121,20 +126,21 @@ final class AutosaveService {
     /// [Nạp bản trên đĩa]: bỏ thay đổi trong app. File không còn → chuyển sang trạng thái bị xoá.
     func reloadFromDisk(_ buffer: Buffer) {
         guard case let .file(url) = buffer.id else { return }
+        let stamp = DiskStamp.of(url)
         guard let data = try? Data(contentsOf: url) else {
             buffer.externalChange = .deleted
             onStatusChange?(buffer)
             return
         }
-        apply(data, to: buffer)
+        apply(data, stamp: stamp, to: buffer)
     }
 
     // MARK: - Private
 
-    private func apply(_ data: Data, to buffer: Buffer) {
+    private func apply(_ data: Data, stamp: DiskStamp?, to buffer: Buffer) {
         cancel(buffer)
         buffer.reload(TextFileCodec.decode(data))
-        buffer.diskDigest = SHA256.hash(data: data)
+        buffer.setDiskState(data, stamp: stamp)
         buffer.externalChange = nil
         buffer.isDirty = false
         buffer.saveState = .saved

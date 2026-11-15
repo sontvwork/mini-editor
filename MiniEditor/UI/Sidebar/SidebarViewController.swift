@@ -7,9 +7,12 @@ private final class WorkspaceItem {
     let root: FileNode
     /// Đường dẫn thật của gốc, để so với đường dẫn FSEvents báo về.
     let realRootPath: String
+    /// Trạng thái "không tìm thấy" lúc tạo; đổi thì phải dựng lại cây.
+    let wasMissing: Bool
 
     init(workspace: Workspace) {
         id = workspace.id
+        wasMissing = workspace.isMissing
         root = FileNode.root(of: workspace.url)
         realRootPath = DirectoryWatcher.realPath(workspace.url.path)
     }
@@ -45,6 +48,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     var onOpenFile: ((URL) -> Void)?
     /// Click vào một nháp trong nhóm NHÁP.
     var onOpenDraft: ((UUID) -> Void)?
+    /// Menu chuột phải trên nháp.
+    var onRenameDraft: ((UUID) -> Void)?
+    var onDeleteDraft: ((UUID) -> Void)?
 
     init(appState: AppState) {
         self.appState = appState
@@ -111,7 +117,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     /// Đồng bộ với `appState.workspaces` (thêm/gỡ), rồi mở lại các nhóm/thư mục đã lưu.
     func reloadWorkspaces() {
         let existing = Dictionary(uniqueKeysWithValues: workspaceItems.map { ($0.id, $0) })
-        workspaceItems = appState.workspaces.map { existing[$0.id] ?? WorkspaceItem(workspace: $0) }
+        workspaceItems = appState.workspaces.map { workspace in
+            if let item = existing[workspace.id], item.wasMissing == workspace.isMissing { return item }
+            return WorkspaceItem(workspace: workspace)
+        }
         syncDraftItems()
         outlineView.reloadData()
         withRestoringExpansion {
@@ -380,11 +389,32 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let row = outlineView.clickedRow
-        guard row >= 0, let workspace = outlineView.item(atRow: row) as? WorkspaceItem else { return }
-        let item = NSMenuItem(title: "Gỡ khỏi sidebar", action: #selector(removeWorkspace(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = workspace.id
-        menu.addItem(item)
+        guard row >= 0 else { return }
+        func add(_ title: String, _ action: Selector, _ id: UUID) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = id
+            menu.addItem(item)
+        }
+        switch outlineView.item(atRow: row) {
+        case let workspace as WorkspaceItem:
+            add("Gỡ khỏi sidebar", #selector(removeWorkspace(_:)), workspace.id)
+        case let draft as DraftItem:
+            add("Đổi tên", #selector(renameDraft(_:)), draft.id)
+            add("Xoá nháp", #selector(deleteDraft(_:)), draft.id)
+        default:
+            break
+        }
+    }
+
+    @objc private func renameDraft(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        onRenameDraft?(id)
+    }
+
+    @objc private func deleteDraft(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        onDeleteDraft?(id)
     }
 }
 

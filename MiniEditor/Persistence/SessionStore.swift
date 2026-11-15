@@ -96,10 +96,19 @@ final class SessionStore {
         self.fileURL = fileURL
     }
 
-    /// `nil` nếu chưa có file hoặc file hỏng.
+    /// `nil` nếu chưa có file hoặc file hỏng. File hỏng được đổi tên thành `session.corrupt-<thời điểm>.json`
+    /// để lần lưu sau không ghi đè mất (danh sách workspace, nháp vẫn còn đó để cứu).
     func load() -> Session? {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? Self.decode(data)
+        do {
+            return try Self.decode(data)
+        } catch {
+            let stamp = Int(Date().timeIntervalSince1970)
+            let backup = fileURL.deletingLastPathComponent().appendingPathComponent("session.corrupt-\(stamp).json")
+            try? FileManager.default.moveItem(at: fileURL, to: backup)
+            NSLog("MiniEditor: session.json hỏng (\(error)), đã chuyển sang \(backup.lastPathComponent)")
+            return nil
+        }
     }
 
     func scheduleSave() {

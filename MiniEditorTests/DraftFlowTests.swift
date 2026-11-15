@@ -79,3 +79,43 @@ final class DraftFlowTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url("x.md"), encoding: .utf8), "more")
     }
 }
+
+@MainActor
+final class DraftRenameDeleteTests: XCTestCase {
+    func testRenameUpdatesDraftBufferAndSession() throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        let state = AppState(draftStore: DraftStore(directory: dir.url.appendingPathComponent("drafts")))
+        let id = try state.newDraft()
+        var layoutChanges = 0
+        state.onLayoutChange = { layoutChanges += 1 }
+
+        state.renameDraft(id, to: "  prompt deploy  ")
+        XCTAssertEqual(state.drafts.first?.title, "prompt deploy")
+        XCTAssertEqual(state.buffers[.draft(id)]?.displayName, "prompt deploy")
+        XCTAssertEqual(layoutChanges, 1)
+
+        state.renameDraft(id, to: "   ")
+        XCTAssertEqual(state.drafts.first?.title, "prompt deploy", "tên rỗng bị bỏ qua")
+        // Tên mới không chiếm số của "Chưa đặt tên-N".
+        try state.newDraft()
+        XCTAssertEqual(state.drafts.last?.title, "Chưa đặt tên-1")
+    }
+
+    func testDeleteClosesTabAndRemovesFile() throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        let state = AppState(draftStore: DraftStore(directory: dir.url.appendingPathComponent("drafts")))
+        let keep = try state.newDraft()
+        let gone = try state.newDraft()
+        state.buffers[.draft(gone)]?.textStorage.append(NSAttributedString(string: "chưa lưu"))
+
+        try state.deleteDraft(gone)
+
+        XCTAssertEqual(state.drafts.map(\.id), [keep])
+        XCTAssertNil(state.buffers[.draft(gone)])
+        XCTAssertFalse(state.draftStore.exists(gone), "không ghi lại file đã xoá")
+        XCTAssertFalse(state.layout.allTabs.contains { $0.buffer == .draft(gone) })
+        XCTAssertTrue(state.draftStore.exists(keep))
+    }
+}

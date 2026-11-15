@@ -52,6 +52,25 @@ enum TextFileCodec {
     }
 }
 
+/// Dấu vết rẻ của một file trên đĩa (kích thước, thời gian sửa tới nano giây, inode).
+/// Trùng dấu vết → coi như nội dung không đổi, khỏi đọc lại cả file để so hash.
+struct DiskStamp: Equatable, Sendable {
+    let size: Int64
+    let modifiedSeconds: Int
+    let modifiedNanoseconds: Int
+    let inode: UInt64
+
+    /// `nil` nếu file không tồn tại/không stat được. Đi theo symlink.
+    nonisolated static func of(_ url: URL) -> DiskStamp? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        return DiskStamp(size: Int64(info.st_size),
+                         modifiedSeconds: info.st_mtimespec.tv_sec,
+                         modifiedNanoseconds: info.st_mtimespec.tv_nsec,
+                         inode: UInt64(info.st_ino))
+    }
+}
+
 /// Ghi file atomic (file tạm cùng thư mục rồi `rename`) và giữ quyền POSIX (vd. +x).
 enum AtomicFileWriter {
     nonisolated static func write(_ data: Data, to url: URL) throws {

@@ -16,8 +16,20 @@ struct Workspace: Identifiable, Equatable {
         self.url = url.standardizedFileURL
         self.expandedDirs = expandedDirs
         self.collapsed = collapsed
+        isMissing = Self.directoryIsMissing(self.url)
+    }
+
+    /// Kiểm tra lại thư mục còn trên đĩa không. Trả về `true` nếu trạng thái đổi.
+    mutating func refreshMissing() -> Bool {
+        let missing = Self.directoryIsMissing(url)
+        guard missing != isMissing else { return false }
+        isMissing = missing
+        return true
+    }
+
+    private static func directoryIsMissing(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
-        isMissing = !(FileManager.default.fileExists(atPath: self.url.path, isDirectory: &isDirectory) && isDirectory.boolValue)
+        return !(FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue)
     }
 
     /// Tên hiển thị trên sidebar (viết HOA).

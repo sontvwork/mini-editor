@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// Nguồn sự thật duy nhất cho UI.
@@ -88,6 +87,15 @@ final class AppState {
         onWorkspacesChange?()
         setLayout(ColumnLayoutEngine.removeWorkspace(id, from: layout))
         markSessionDirty()
+    }
+
+    /// Thư mục gốc workspace bị xoá/đổi tên hoặc xuất hiện lại → cập nhật `isMissing` ("(không tìm thấy)").
+    func refreshMissingWorkspaces() {
+        var changed = false
+        for index in workspaces.indices where workspaces[index].refreshMissing() {
+            changed = true
+        }
+        if changed { onWorkspacesChange?() }
     }
 
     /// Workspace chứa file (workspace lồng nhau → chọn cái sâu nhất).
@@ -256,6 +264,32 @@ final class AppState {
         open(Tab(buffer: bufferID, workspaceID: nil))
     }
 
+    /// Đổi tên hiển thị của nháp (SPEC §3.5). Tên rỗng thì bỏ qua.
+    func renameDraft(_ id: UUID, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = drafts.firstIndex(where: { $0.id == id }),
+              drafts[index].title != trimmed else { return }
+        drafts[index].title = trimmed
+        buffers[.draft(id)]?.draftTitle = trimmed
+        onDraftsChange?()
+        onLayoutChange?() // tên trên tab
+        markSessionDirty()
+    }
+
+    /// Xoá hẳn nháp (đã hỏi xác nhận ở UI): đóng tab nếu đang mở, xoá file trong `drafts/`.
+    func deleteDraft(_ id: UUID) throws {
+        guard drafts.contains(where: { $0.id == id }) else { return }
+        if buffers[.draft(id)] != nil {
+            closeTab(.draft(id), discardingChanges: true)
+        }
+        if draftStore.exists(id) {
+            try draftStore.delete(id)
+        }
+        drafts.removeAll { $0.id == id }
+        onDraftsChange?()
+        markSessionDirty()
+    }
+
     /// Save As cho nháp: ghi ra `url`, buffer thành file thường, nháp bị xoá khỏi nhóm NHÁP.
     /// File nằm trong workspace đang mở → tab chuyển sang cột của workspace đó (SPEC §3.5).
     func saveDraft(_ id: UUID, to url: URL) throws {
@@ -270,7 +304,7 @@ final class AppState {
 
         autosave.cancel(buffer)
         buffer.becomeFile(url)
-        buffer.diskDigest = SHA256.hash(data: data)
+        buffer.setDiskState(data, stamp: DiskStamp.of(url))
         buffer.isDirty = false
         buffer.saveState = .saved
         buffers[.draft(id)] = nil

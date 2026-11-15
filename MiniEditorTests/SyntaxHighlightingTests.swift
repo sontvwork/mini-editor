@@ -4,13 +4,20 @@ import XCTest
 /// Tô màu trong text view, ⌘/, đổi ngôn ngữ (SPEC §3.8, §3.10).
 @MainActor
 final class SyntaxHighlightingTests: XCTestCase {
+    private var scrollViews: [NSScrollView] = []
     private func color(_ textView: CodeTextView, at index: Int) -> NSColor? {
-        (textView.layoutManager as? SyntaxLayoutManager)?.flushPendingHighlight()
+        let length = textView.textStorage?.length ?? 0
+        (textView.layoutManager as? SyntaxLayoutManager)?.ensureHighlighted(NSRange(location: 0, length: length))
         return textView.layoutManager?.temporaryAttribute(.foregroundColor, atCharacterIndex: index, effectiveRange: nil) as? NSColor
     }
 
     private func makeView(_ text: String, _ language: Language) -> (CodeTextView, NSTextStorage) {
         let textView = CodeTextView.make(fontSize: 13)
+        // Như trong app: text view nằm trong scroll view, chỉ một phần nhìn thấy.
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        textView.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        scrollView.documentView = textView
+        scrollViews.append(scrollView)
         let storage = NSTextStorage(string: text)
         textView.attach(storage, language: language)
         return (textView, storage)
@@ -68,13 +75,30 @@ final class SyntaxHighlightingTests: XCTestCase {
                        Theme.syntaxKeyword)
     }
 
-    func testShiftRange() {
-        // Chèn 2 ký tự tại 1: vùng [3,5) cũ → [5,7).
-        XCTAssertEqual(SyntaxLayoutManager.shift(NSRange(location: 3, length: 2), by: NSRange(location: 1, length: 2),
-                                                 changeInLength: 2), NSRange(location: 5, length: 2))
-        // Sửa phía sau vùng → giữ nguyên.
-        XCTAssertEqual(SyntaxLayoutManager.shift(NSRange(location: 0, length: 2), by: NSRange(location: 5, length: 1),
-                                                 changeInLength: 1), NSRange(location: 0, length: 2))
+    func testOnlyVisiblePartIsHighlightedUntilNeeded() {
+        let text = String(repeating: "echo x\n", count: 3000)
+        let (textView, _) = makeView(text, .bash)
+        let lastLine = (text as NSString).length - 7
+        let raw = { textView.layoutManager?.temporaryAttribute(.foregroundColor, atCharacterIndex: $0,
+                                                               effectiveRange: nil) as? NSColor }
+        XCTAssertEqual(raw(0), Theme.syntaxKeyword, "vùng nhìn thấy được tô ngay")
+        XCTAssertNil(raw(lastLine), "cuối file chưa tô")
+        // Vẽ vùng cuối → được tô trước khi vẽ.
+        let layoutManager = try! XCTUnwrap(textView.layoutManager as? SyntaxLayoutManager)
+        layoutManager.ensureLayout(for: textView.textContainer!)
+        let glyph = layoutManager.glyphIndexForCharacter(at: lastLine)
+        let rect = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        layoutManager.ensureHighlighted(in: rect.offsetBy(dx: 0, dy: textView.textContainerOrigin.y), of: textView)
+        XCTAssertEqual(raw(lastLine), Theme.syntaxKeyword)
+    }
+
+    func testEditInvalidatesShiftedRanges() {
+        let (textView, storage) = makeView("echo a\nx\necho b\n", .bash)
+        _ = color(textView, at: 0) // tô hết
+        storage.replaceCharacters(in: NSRange(location: 0, length: 0), with: "fi\n")
+        XCTAssertEqual(color(textView, at: 0), Theme.syntaxKeyword)
+        XCTAssertEqual(color(textView, at: 3), Theme.syntaxKeyword, "dòng cũ dời xuống vẫn giữ màu")
+        XCTAssertEqual(color(textView, at: 12), Theme.syntaxKeyword)
     }
 
     func testChangingLanguageWhileStorageIsEditingIsDeferred() {
@@ -96,11 +120,13 @@ final class SyntaxHighlightingTests: XCTestCase {
         let bash = String(repeating: "if [ \"$A\" ]; then echo \"x $B\" # c\nfi\n", count: 2500)
         let markdown = String(repeating: "# h\n- **a** `b` [c](d)\n```\ncode\n```\n", count: 1000)
         for (text, language) in [(bash, Language.bash), (markdown, .markdown)] {
+            let attachStart = ContinuousClock.now
             let (textView, storage) = makeView(text, language)
+            print("[perf] \(language) tô cả file khi gắn (\(text.utf16.count / 1024)KB): \(ContinuousClock.now - attachStart)")
             let layoutManager = try! XCTUnwrap(textView.layoutManager as? SyntaxLayoutManager)
             let start = ContinuousClock.now
             for i in 0..<20 {
-                storage.replaceCharacters(in: NSRange(location: 2000 + i, length: 0), with: "x")
+                storage.replaceCharacters(in: NSRange(location: 200 + i, length: 0), with: "x") // trong vùng nhìn thấy
                 layoutManager.flushPendingHighlight()
             }
             let perKeystroke = (ContinuousClock.now - start) / 20

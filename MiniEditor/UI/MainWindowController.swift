@@ -39,6 +39,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.backgroundColor = Theme.chromeBackground
         window.minSize = NSSize(width: 480, height: 320)
         window.tabbingMode = .disallowed
+        // Mọi màu của app là sRGB (Theme). Trên màn hình XDR/P3, không gán colorSpace thì backing store của
+        // vùng chữ là half-float 8 byte/pixel; sRGB → BGRA 4 byte/pixel, giảm ~13MB RAM lúc rảnh (SPEC §7).
+        window.colorSpace = .sRGB
         super.init(window: window)
 
         buildContent(in: window)
@@ -182,6 +185,43 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// Chuột phải → "Đổi tên": chỉ đổi tên hiển thị.
+    private func showRenameDraft(_ id: UUID) {
+        guard let window, let draft = appState.drafts.first(where: { $0.id == id }) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Đổi tên nháp"
+        let field = NSTextField(string: draft.title)
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Đổi tên")
+        alert.addButton(withTitle: "Huỷ")
+        alert.window.initialFirstResponder = field
+        Task { @MainActor in
+            guard await alert.beginSheetModal(for: window) == .alertFirstButtonReturn else { return }
+            appState.renameDraft(id, to: field.stringValue)
+        }
+    }
+
+    /// Chuột phải → "Xoá nháp": hỏi xác nhận rồi xoá hẳn file nháp.
+    private func confirmDeleteDraft(_ id: UUID) {
+        guard let window, let draft = appState.drafts.first(where: { $0.id == id }) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Xoá nháp “\(draft.title)”?"
+        alert.informativeText = "Nội dung nháp sẽ bị xoá hẳn và không thể khôi phục."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Xoá")
+        alert.addButton(withTitle: "Huỷ")
+        alert.buttons.first?.hasDestructiveAction = true
+        Task { @MainActor in
+            guard await alert.beginSheetModal(for: window) == .alertFirstButtonReturn else { return }
+            do {
+                try appState.deleteDraft(id)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
     private func showError(_ error: Error) {
         guard let window else { return }
         NSAlert(error: error).beginSheetModal(for: window)
@@ -240,11 +280,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
                 self?.showError(error)
             }
         }
+        sidebar.onRenameDraft = { [weak self] id in self?.showRenameDraft(id) }
+        sidebar.onDeleteDraft = { [weak self] id in self?.confirmDeleteDraft(id) }
         appState.onWorkspacesChange = { [weak self] in
             self?.sidebar.reloadWorkspaces()
             self?.updateWatchedDirectories()
         }
         directoryWatcher = DirectoryWatcher { [weak self] changes in
+            // Thư mục gốc bị đổi → có thể workspace vừa mất.
+            if !changes.recursivePaths.isEmpty { self?.appState.refreshMissingWorkspaces() }
             self?.sidebar.applyDirectoryChanges(changes)
         }
         NotificationCenter.default.addObserver(

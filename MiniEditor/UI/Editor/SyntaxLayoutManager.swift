@@ -2,8 +2,11 @@ import AppKit
 
 /// Layout manager của một cột editor, kiêm tô màu cú pháp (SPEC §3.8):
 /// - Chỉ dùng temporary attributes, không sửa `NSTextStorage` (không bẩn undo, không layout lại).
-/// - Sau mỗi lần sửa chỉ tô lại vùng `Highlighter` báo (thường là các dòng bị sửa). Vùng được tính ngay khi sửa,
-///   nhưng áp màu hoãn tới khi storage sửa xong (`RunLoop.perform`, vẫn trước lần vẽ kế tiếp): đổi temporary
+/// - Tô lười: chỉ tô phần đang nhìn thấy (dư nửa màn hình mỗi phía); phần còn lại được tô ngay trước khi vẽ
+///   (`CodeTextView.draw`). `highlighted` giữ các vị trí đã tô đúng.
+/// - Sau mỗi lần sửa: dời `highlighted` theo lần sửa và bỏ vùng `Highlighter` báo (thường là các dòng bị sửa;
+///   Markdown đổi dấu ``` thì tới cuối văn bản) — chỉ phần nhìn thấy được tô lại ngay.
+/// - Áp màu hoãn tới khi storage sửa xong (`RunLoop.perform`, vẫn trước lần vẽ kế tiếp): đổi temporary
 ///   attributes trong lúc storage đang sửa có thể bắt layout manager sinh glyph → AppKit ném exception.
 /// - Temporary attributes không đổi được font → vẽ đậm (viền chữ) / nghiêng (nghiêng hệ toạ độ) giả lập lúc vẽ.
 /// Không gắn `@MainActor` vì `NSLayoutManager` không gắn; thực tế chỉ dùng trên main thread cùng text view.
@@ -24,23 +27,28 @@ final class SyntaxLayoutManager: NSLayoutManager {
     /// Kiểu đậm/nghiêng và màu của đoạn đang vẽ (đặt trong `drawGlyphs`, đọc trong `showCGGlyphs`).
     private var drawingStyle: FontStyle?
     private var drawingColor: NSColor?
-    /// Vùng chờ tô lại (toạ độ văn bản hiện tại).
-    private var pendingRange: NSRange?
+    /// Vị trí ký tự đã tô đúng. Ngoài tập này temporary attributes có thể đã cũ.
+    private var highlighted = IndexSet()
+    /// Cần xoá hết temporary attributes cũ (đổi storage/ngôn ngữ) trước lần tô kế tiếp.
+    private var needsClear = false
     private var isFlushScheduled = false
 
-    /// Đổi ngôn ngữ (hoặc vừa gắn storage khác) → tô lại toàn bộ.
+    /// Đổi ngôn ngữ (hoặc vừa gắn storage khác) → tô lại từ đầu.
+    @MainActor
     func setLanguage(_ language: Language) {
         self.language = language
         highlighter = language.makeHighlighter()
         rehighlightAll()
     }
 
-    /// Tô lại toàn bộ. Đang ở giữa một lần sửa storage (vd. nháp tự chuyển sang Bash khi gõ `#!`) thì hoãn.
+    /// Tô lại từ đầu. Đang ở giữa một lần sửa storage (vd. nháp tự chuyển sang Bash khi gõ `#!`) thì hoãn.
+    @MainActor
     func rehighlightAll() {
         guard let storage = textStorage else { return }
         if storage.length > Self.maxHighlightLength { highlighter = nil }
         highlighter?.reset(storage.string as NSString)
-        pendingRange = NSRange(location: 0, length: storage.length)
+        highlighted = []
+        needsClear = true
         if storage.editedMask.isEmpty {
             flushPendingHighlight()
         } else {
@@ -55,63 +63,91 @@ final class SyntaxLayoutManager: NSLayoutManager {
                                  invalidatedRange invalidatedCharRange: NSRange) {
         super.processEditing(for: textStorage, edited: editMask, range: newCharRange,
                              changeInLength: delta, invalidatedRange: invalidatedCharRange)
-        // Tô sau `super` để temporary attributes đã được dời theo lần sửa.
+        // Sau `super`: temporary attributes đã được dời theo lần sửa.
         guard editMask.contains(.editedCharacters) else { return }
         textDidEdit(textStorage, range: newCharRange, changeInLength: delta)
     }
 
     private func textDidEdit(_ textStorage: NSTextStorage, range newCharRange: NSRange, changeInLength delta: Int) {
         guard let highlighter else { return }
-        let range: NSRange
+        // Dời tập đã tô: bỏ đoạn cũ bị sửa, dời phần phía sau theo độ chênh.
+        let oldLength = max(newCharRange.length - delta, 0)
+        highlighted.remove(integersIn: newCharRange.location..<(newCharRange.location + oldLength))
+        highlighted.shift(startingAt: newCharRange.location + oldLength, by: delta)
         if textStorage.length > Self.maxHighlightLength {
             // Vượt ngưỡng → tắt tô màu, xoá màu cũ.
             self.highlighter = nil
-            range = NSRange(location: 0, length: textStorage.length)
+            needsClear = true
         } else {
-            range = highlighter.rangeToRehighlight(editedRange: newCharRange, changeInLength: delta,
-                                                   in: textStorage.string as NSString)
+            let range = highlighter.rangeToRehighlight(editedRange: newCharRange, changeInLength: delta,
+                                                       in: textStorage.string as NSString)
+            if let bounds = Range(range) { highlighted.remove(integersIn: bounds) }
         }
-        pendingRange = pendingRange.map {
-            NSUnionRange(Self.shift($0, by: newCharRange, changeInLength: delta), range)
-        } ?? range
         scheduleFlush()
     }
 
-    /// Áp màu cho vùng đang chờ. Gọi tự động sau mỗi lần sửa; test gọi trực tiếp.
+    /// Tô phần đang nhìn thấy. Gọi tự động sau mỗi lần sửa/đổi storage.
+    @MainActor
     func flushPendingHighlight() {
-        guard let range = pendingRange, let storage = textStorage else { return }
-        pendingRange = nil
-        let text = storage.string as NSString
-        guard range.location <= text.length else { return }
-        let lines = text.lineRange(for: NSIntersectionRange(range, NSRange(location: 0, length: text.length)))
-        if let highlighter {
-            apply(highlighter.tokens(in: lines, of: text), clearing: lines)
-        } else {
-            setTemporaryAttributes([:], forCharacterRange: lines)
+        ensureHighlighted(visibleCharacterRange())
+    }
+
+    /// Tô những dòng trong `range` chưa được tô. Không làm gì khi storage đang sửa.
+    func ensureHighlighted(_ range: NSRange) {
+        guard let storage = textStorage, storage.editedMask.isEmpty else { return }
+        if needsClear {
+            needsClear = false
+            setTemporaryAttributes([:], forCharacterRange: NSRange(location: 0, length: storage.length))
         }
+        guard let highlighter, storage.length > 0 else { return }
+        let text = storage.string as NSString
+        let clamped = NSIntersectionRange(range, NSRange(location: 0, length: text.length))
+        guard let lines = Range(text.lineRange(for: clamped)) else { return }
+        var missing = IndexSet(integersIn: lines)
+        missing.subtract(highlighted)
+        for gap in missing.rangeView {
+            let gapLines = text.lineRange(for: NSRange(gap))
+            apply(highlighter.tokens(in: gapLines, of: text), clearing: gapLines)
+            if let bounds = Range(gapLines) { highlighted.insert(integersIn: bounds) }
+        }
+    }
+
+    /// Tô vùng sắp vẽ (`rect` theo toạ độ text view).
+    @MainActor
+    func ensureHighlighted(in rect: NSRect, of textView: NSTextView) {
+        guard highlighter != nil || needsClear, let container = textView.textContainer else { return }
+        let origin = textView.textContainerOrigin
+        let glyphs = glyphRange(forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y), in: container)
+        ensureHighlighted(characterRange(forGlyphRange: glyphs, actualGlyphRange: nil))
+    }
+
+    /// Ký tự trong vùng nhìn thấy, dư nửa màn hình mỗi phía để cuộn nhẹ không phải tô thêm.
+    @MainActor
+    private func visibleCharacterRange() -> NSRange {
+        guard let textView = firstTextView, let container = textView.textContainer else {
+            return NSRange(location: 0, length: 0)
+        }
+        var rect = textView.visibleRect
+        if rect.isEmpty, let scrollView = textView.enclosingScrollView {
+            rect = scrollView.documentVisibleRect // chưa nằm trong cửa sổ (test)
+        }
+        rect = rect.insetBy(dx: 0, dy: -rect.height / 2)
+        let origin = textView.textContainerOrigin
+        let glyphs = glyphRange(forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y), in: container)
+        return characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
     }
 
     private func scheduleFlush() {
         guard !isFlushScheduled else { return }
         isFlushScheduled = true
         // Layout manager chỉ dùng trên main thread; block chạy trên main run loop.
-        nonisolated(unsafe) weak var manager = self
+        nonisolated(unsafe) weak let manager = self
         RunLoop.main.perform(inModes: [.common]) {
-            manager?.isFlushScheduled = false
-            manager?.flushPendingHighlight()
+            MainActor.assumeIsolated {
+                manager?.isFlushScheduled = false
+                manager?.flushPendingHighlight()
+            }
         }
-    }
-
-    /// Dời một vùng (toạ độ trước lần sửa) theo lần sửa `edited` (toạ độ sau) với độ chênh `delta`.
-    static func shift(_ range: NSRange, by edited: NSRange, changeInLength delta: Int) -> NSRange {
-        let oldEditEnd = NSMaxRange(edited) - delta
-        func map(_ position: Int) -> Int {
-            if position <= edited.location { return position }
-            if position >= oldEditEnd { return position + delta }
-            return NSMaxRange(edited)
-        }
-        let start = map(range.location)
-        return NSRange(location: start, length: max(map(NSMaxRange(range)) - start, 0))
     }
 
     // MARK: - Vẽ đậm/nghiêng

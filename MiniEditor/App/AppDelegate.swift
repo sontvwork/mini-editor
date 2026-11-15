@@ -14,9 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// `~/Library/Application Support/MiniEditor/`. Khi chạy unit test dùng thư mục tạm,
-    /// để test không đọc/ghi đè session thật.
+    /// để test không đọc/ghi đè session thật. `MINIEDITOR_SUPPORT_DIR` (chỉ cho dev, vd. đo hiệu năng
+    /// với session mẫu) thay thư mục này.
     private static func supportDirectory() -> URL {
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+        let environment = ProcessInfo.processInfo.environment
+        if let path = environment["MINIEDITOR_SUPPORT_DIR"], !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        if environment["XCTestConfigurationFilePath"] != nil {
             return FileManager.default.temporaryDirectory
                 .appendingPathComponent("MiniEditor-test-\(UUID().uuidString)", isDirectory: true)
         }
@@ -44,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    /// Quay lại app → workspace bị mất có thể đã xuất hiện lại (hoặc ngược lại).
+    func applicationDidBecomeActive(_ notification: Notification) {
+        appState.refreshMissingWorkspaces()
     }
 
     /// App mất focus → lưu mọi thứ.
