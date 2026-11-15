@@ -65,6 +65,11 @@ final class StatusBarView: NSView {
         )
     }
 
+    /// Không có tab nào → ẩn `Dòng X, Cột Y`.
+    func setCursorVisible(_ visible: Bool) {
+        cursorLabel.isHidden = !visible
+    }
+
     func setCursor(line: Int, column: Int) {
         cursorLabel.stringValue = "Dòng \(line), Cột \(column)"
     }

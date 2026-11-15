@@ -231,6 +231,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         let buffer = appState.activeBuffer
         statusBar.setSaveState(buffer?.saveState, isReadOnly: buffer?.isReadOnly ?? false)
         statusBar.setLanguage(buffer?.language)
+        statusBar.setCursorVisible(buffer != nil)
     }
 
     private func bindState() {
