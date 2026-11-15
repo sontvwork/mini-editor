@@ -129,6 +129,11 @@ final class Buffer: NSObject {
         language = Language.detect(fileName: url.lastPathComponent, firstLine: Language.firstLine(of: text))
     }
 
+    /// File được đổi tên trong app: nội dung, kiểu xuống dòng và trạng thái đĩa giữ nguyên.
+    func rename(to url: URL) {
+        id = .file(path: url)
+    }
+
     @objc private func storageDidProcessEditing(_ notification: Notification) {
         guard !isReloading, textStorage.editedMask.contains(.editedCharacters) else { return }
         onEdit?()

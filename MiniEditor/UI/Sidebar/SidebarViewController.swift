@@ -51,6 +51,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     /// Menu chuột phải trên nháp.
     var onRenameDraft: ((UUID) -> Void)?
     var onDeleteDraft: ((UUID) -> Void)?
+    /// Menu chuột phải trên workspace / file.
+    var onNewFile: ((Workspace.ID) -> Void)?
+    var onRenameFile: ((URL) -> Void)?
+    var onDeleteFile: ((URL) -> Void)?
 
     init(appState: AppState) {
         self.appState = appState
@@ -390,21 +394,42 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         menu.removeAllItems()
         let row = outlineView.clickedRow
         guard row >= 0 else { return }
-        func add(_ title: String, _ action: Selector, _ id: UUID) {
+        func add(_ title: String, _ action: Selector, _ object: Any) {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
-            item.representedObject = id
+            item.representedObject = object
             menu.addItem(item)
         }
         switch outlineView.item(atRow: row) {
         case let workspace as WorkspaceItem:
             add("Gỡ khỏi sidebar", #selector(removeWorkspace(_:)), workspace.id)
+            if !isMissing(workspace) {
+                add("Tạo file mới", #selector(newFile(_:)), workspace.id)
+            }
+        case let node as FileNode where !node.isDirectory:
+            add("Đổi tên", #selector(renameFile(_:)), node.url)
+            add("Xoá", #selector(deleteFile(_:)), node.url)
         case let draft as DraftItem:
             add("Đổi tên", #selector(renameDraft(_:)), draft.id)
             add("Xoá nháp", #selector(deleteDraft(_:)), draft.id)
         default:
             break
         }
+    }
+
+    @objc private func newFile(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? Workspace.ID else { return }
+        onNewFile?(id)
+    }
+
+    @objc private func renameFile(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        onRenameFile?(url)
+    }
+
+    @objc private func deleteFile(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        onDeleteFile?(url)
     }
 
     @objc private func renameDraft(_ sender: NSMenuItem) {

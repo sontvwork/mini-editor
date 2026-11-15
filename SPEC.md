@@ -47,6 +47,10 @@ LSP, autocomplete, extension/plugin, git, terminal tích hợp, minimap, tìm ki
 - Cây thư mục hiện cả thư mục con. Ẩn: `.git`, `.DS_Store`, `node_modules`, `vendor`, `.idea`, `.vscode`.
 - Sắp xếp trong cây: thư mục trước, file sau, mỗi nhóm theo tên A→Z (không phân biệt hoa thường, so sánh kiểu Finder).
 - Tự làm mới khi trên đĩa có file/thư mục được thêm, xoá hoặc đổi tên (FSEvents, debounce 200ms).
+- Menu chuột phải trên sidebar:
+  - Tên workspace → "Tạo file mới" (nằm dưới "Gỡ khỏi sidebar"): hỏi tên, tạo file rỗng ở gốc workspace (trùng tên thì báo lỗi, không ghi đè) rồi mở. Nhóm NHÁP không có mục này.
+  - File → "Đổi tên": đổi tên trong cùng thư mục; tab đang mở giữ nguyên nội dung, con trỏ, nhận diện lại ngôn ngữ.
+  - File → "Xoá": hỏi xác nhận, chuyển file vào Thùng rác, đóng tab nếu đang mở.
 - Click 1 lần vào file là mở file đó. File đang active trong cột đang focus được highlight trên sidebar.
 - ⌘B ẩn/hiện sidebar. Kéo được độ rộng sidebar (mặc định 240px, tối thiểu 160px).
 - Trạng thái mở/đóng của từng thư mục được lưu lại trong session.

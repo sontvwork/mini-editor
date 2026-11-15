@@ -185,6 +185,62 @@ final class AppState {
         layout.focusedColumn.workspaceID.flatMap { workspace(id: $0) }
     }
 
+    // MARK: - File trên sidebar
+
+    enum FileOperationError: LocalizedError {
+        case invalidName
+
+        var errorDescription: String? { "Tên file không hợp lệ." }
+    }
+
+    /// Tạo file rỗng ở gốc workspace rồi mở nó. Trùng tên → lỗi, không ghi đè.
+    @discardableResult
+    func createFile(named name: String, in workspaceID: Workspace.ID) throws -> URL {
+        guard let workspace = workspace(id: workspaceID) else { throw CocoaError(.fileNoSuchFile) }
+        let url = workspace.url.appendingPathComponent(try Self.validFileName(name))
+        try Data().write(to: url, options: .withoutOverwriting)
+        try openFile(url)
+        return url
+    }
+
+    /// Đổi tên file trong cùng thư mục. Tab đang mở giữ nguyên nội dung và vị trí.
+    func renameFile(_ url: URL, to name: String) throws {
+        let newURL = url.deletingLastPathComponent().appendingPathComponent(try Self.validFileName(name))
+        guard newURL.lastPathComponent != url.lastPathComponent else { return }
+        let oldID = BufferID.file(path: url)
+        let buffer = buffers[oldID]
+        if let buffer { autosave.save(buffer) } // ghi nốt thay đổi đang chờ vào tên cũ
+        try FileManager.default.moveItem(at: url, to: newURL)
+        guard let buffer else { return }
+
+        let newID = BufferID.file(path: newURL)
+        buffer.rename(to: newURL)
+        buffers[oldID] = nil
+        buffers[newID] = buffer
+        let tab = Tab(buffer: newID, workspaceID: workspaceID(containing: newURL))
+        setLayout(ColumnLayoutEngine.replace(oldID, with: tab, in: layout))
+        if !buffer.isLanguageManual {
+            setLanguage(Language.detect(fileName: newURL.lastPathComponent, firstLine: Language.firstLine(of: buffer.text)),
+                        of: buffer, manual: false)
+        }
+    }
+
+    /// Chuyển file vào Thùng rác (đã hỏi xác nhận ở UI), đóng tab nếu đang mở.
+    func deleteFile(_ url: URL) throws {
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        let id = BufferID.file(path: url)
+        if buffers[id] != nil {
+            closeTab(id, discardingChanges: true)
+        }
+    }
+
+    private static func validFileName(_ name: String) throws -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != ".", trimmed != "..",
+              !trimmed.contains("/"), !trimmed.contains(":") else { throw FileOperationError.invalidName }
+        return trimmed
+    }
+
     // MARK: - Lưu
 
     /// ⌘S trên file thường: lưu ngay.

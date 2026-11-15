@@ -187,19 +187,71 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     /// Chuột phải → "Đổi tên": chỉ đổi tên hiển thị.
     private func showRenameDraft(_ id: UUID) {
-        guard let window, let draft = appState.drafts.first(where: { $0.id == id }) else { return }
+        guard let draft = appState.drafts.first(where: { $0.id == id }) else { return }
+        Task { @MainActor in
+            guard let name = await askName(title: "Đổi tên nháp", initial: draft.title, button: "Đổi tên") else { return }
+            appState.renameDraft(id, to: name)
+        }
+    }
+
+    /// Chuột phải trên workspace → "Tạo file mới": tạo file rỗng ở gốc workspace rồi mở.
+    private func showNewFile(in workspaceID: Workspace.ID) {
+        Task { @MainActor in
+            guard let name = await askName(title: "File mới", initial: "", button: "Tạo") else { return }
+            do {
+                try appState.createFile(named: name, in: workspaceID)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    /// Chuột phải trên file → "Đổi tên".
+    private func showRenameFile(_ url: URL) {
+        Task { @MainActor in
+            guard let name = await askName(title: "Đổi tên file", initial: url.lastPathComponent,
+                                           button: "Đổi tên") else { return }
+            do {
+                try appState.renameFile(url, to: name)
+            } catch {
+                showError(error)
+            }
+        }
+    }
+
+    /// Chuột phải trên file → "Xoá": hỏi xác nhận rồi chuyển vào Thùng rác.
+    private func confirmDeleteFile(_ url: URL) {
+        guard let window else { return }
         let alert = NSAlert()
-        alert.messageText = "Đổi tên nháp"
-        let field = NSTextField(string: draft.title)
-        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Đổi tên")
+        alert.messageText = "Xoá “\(url.lastPathComponent)”?"
+        alert.informativeText = "File sẽ được chuyển vào Thùng rác."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Xoá")
         alert.addButton(withTitle: "Huỷ")
-        alert.window.initialFirstResponder = field
+        alert.buttons.first?.hasDestructiveAction = true
         Task { @MainActor in
             guard await alert.beginSheetModal(for: window) == .alertFirstButtonReturn else { return }
-            appState.renameDraft(id, to: field.stringValue)
+            do {
+                try appState.deleteFile(url)
+            } catch {
+                showError(error)
+            }
         }
+    }
+
+    /// Hộp thoại nhập tên. Huỷ → `nil`.
+    private func askName(title: String, initial: String, button: String) async -> String? {
+        guard let window else { return nil }
+        let alert = NSAlert()
+        alert.messageText = title
+        let field = NSTextField(string: initial)
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Huỷ")
+        alert.window.initialFirstResponder = field
+        guard await alert.beginSheetModal(for: window) == .alertFirstButtonReturn else { return nil }
+        return field.stringValue
     }
 
     /// Chuột phải → "Xoá nháp": hỏi xác nhận rồi xoá hẳn file nháp.
@@ -283,6 +335,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         sidebar.onRenameDraft = { [weak self] id in self?.showRenameDraft(id) }
         sidebar.onDeleteDraft = { [weak self] id in self?.confirmDeleteDraft(id) }
+        sidebar.onNewFile = { [weak self] id in self?.showNewFile(in: id) }
+        sidebar.onRenameFile = { [weak self] url in self?.showRenameFile(url) }
+        sidebar.onDeleteFile = { [weak self] url in self?.confirmDeleteFile(url) }
         appState.onWorkspacesChange = { [weak self] in
             self?.sidebar.reloadWorkspaces()
             self?.updateWatchedDirectories()
