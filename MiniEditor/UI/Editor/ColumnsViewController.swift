@@ -88,6 +88,10 @@ final class ColumnsViewController: NSViewController {
         columnViews.values.filter { $0.displayedBuffer === buffer }.forEach { $0.refreshBanner() }
     }
 
+    func languageDidChange(for buffer: Buffer) {
+        columnViews.values.filter { $0.displayedBuffer === buffer }.forEach { $0.languageDidChange() }
+    }
+
     /// Buffer vừa được nạp lại từ đĩa → cột đang hiện nó áp lại con trỏ/cuộn.
     func bufferDidReload(_ buffer: Buffer) {
         columnViews.values.filter { $0.displayedBuffer === buffer }.forEach { $0.bufferDidReload() }

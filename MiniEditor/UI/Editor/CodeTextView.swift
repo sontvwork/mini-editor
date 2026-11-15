@@ -18,7 +18,7 @@ final class CodeTextView: NSTextView {
     /// Dựng đủ chuỗi TextKit 1: storage → layout manager → container → view.
     static func make(fontSize: CGFloat) -> CodeTextView {
         let storage = NSTextStorage()
-        let layoutManager = NSLayoutManager()
+        let layoutManager = SyntaxLayoutManager()
         storage.addLayoutManager(layoutManager)
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
@@ -79,16 +79,52 @@ final class CodeTextView: NSTextView {
         applyAttributesToStorage()
     }
 
-    /// Gắn storage của buffer khác vào view (chuyển tab). Không tạo lại view.
-    func attach(_ storage: NSTextStorage) {
-        guard let layoutManager, storage !== textStorage else { return }
-        if let old = textStorage {
-            NotificationCenter.default.removeObserver(self, name: NSTextStorage.didProcessEditingNotification, object: old)
+    /// Gắn storage của buffer khác vào view (chuyển tab) rồi tô màu lại. Không tạo lại view.
+    func attach(_ storage: NSTextStorage, language: Language = .plain) {
+        guard let layoutManager else { return }
+        if storage !== textStorage {
+            if let old = textStorage {
+                NotificationCenter.default.removeObserver(self, name: NSTextStorage.didProcessEditingNotification, object: old)
+            }
+            layoutManager.replaceTextStorage(storage)
+            observe(storage)
+            cachedLineIndex = nil
+            applyAttributesToStorage()
         }
-        layoutManager.replaceTextStorage(storage)
-        observe(storage)
-        cachedLineIndex = nil
-        applyAttributesToStorage()
+        setLanguage(language)
+    }
+
+    /// Đổi ngôn ngữ: tô màu lại toàn bộ, đổi ký hiệu comment cho ⌘/.
+    func setLanguage(_ language: Language) {
+        (layoutManager as? SyntaxLayoutManager)?.setLanguage(language)
+    }
+
+    var language: Language {
+        (layoutManager as? SyntaxLayoutManager)?.language ?? .plain
+    }
+
+    /// ⌘/: bật/tắt comment các dòng đang chọn. Bash: `# `; ngôn ngữ khác: không làm gì (SPEC §3.10).
+    @objc func toggleLineComment(_ sender: Any?) {
+        guard language == .bash, isEditable, let storage = textStorage else { return }
+        let text = storage.string as NSString
+        let selection = selectedRange()
+        let lines = text.lineRange(for: selection)
+        let old = text.substring(with: lines)
+        let new = LineComment.toggle(old, prefix: "# ")
+        guard new != old, shouldChangeText(in: lines, replacementString: new) else { return }
+        breakUndoCoalescing()
+        storage.replaceCharacters(in: lines, with: new)
+        didChangeText()
+        let newLength = (new as NSString).length
+        if selection.length == 0 {
+            // Con trỏ dời theo số ký tự thêm/bớt ở dòng đầu, không lùi quá đầu dòng.
+            let firstLineDelta = LineComment.firstLineDelta(old: old, new: new)
+            let location = min(max(lines.location, selection.location + firstLineDelta), lines.location + newLength)
+            setSelectedRange(NSRange(location: location, length: 0))
+        } else {
+            let trailingNewline = new.hasSuffix("\n") ? 1 : 0
+            setSelectedRange(NSRange(location: lines.location, length: newLength - trailingNewline))
+        }
     }
 
     override func becomeFirstResponder() -> Bool {

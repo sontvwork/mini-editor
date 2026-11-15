@@ -26,6 +26,8 @@ final class AppState {
     var onBufferStatusChange: ((Buffer) -> Void)?
     /// Gọi khi nội dung buffer được nạp lại từ đĩa (file bị sửa bên ngoài).
     var onBufferReload: ((Buffer) -> Void)?
+    /// Gọi khi ngôn ngữ của một buffer đổi.
+    var onBufferLanguageChange: ((Buffer) -> Void)?
     /// Có gì đó cần ghi vào session.json.
     var onSessionDirty: (() -> Void)?
 
@@ -185,6 +187,20 @@ final class AppState {
     /// Lưu mọi buffer có thay đổi (đổi tab, app mất focus, thoát app).
     func saveAllBuffers() {
         autosave.saveAll(buffers.values)
+    }
+
+    // MARK: - Ngôn ngữ
+
+    /// Đổi ngôn ngữ của buffer (menu trên thanh trạng thái, hoặc tự nhận diện), lưu vào session.
+    func setLanguage(_ language: Language, of buffer: Buffer, manual: Bool = true) {
+        if manual { buffer.isLanguageManual = true }
+        guard buffer.language != language else { return }
+        buffer.language = language
+        if case let .draft(id) = buffer.id, let index = drafts.firstIndex(where: { $0.id == id }) {
+            drafts[index].language = language
+        }
+        onBufferLanguageChange?(buffer)
+        markSessionDirty()
     }
 
     // MARK: - Thay đổi từ bên ngoài
@@ -400,6 +416,11 @@ final class AppState {
         buffer.onEdit = { [weak self, weak buffer] in
             guard let self, let buffer else { return }
             self.autosave.bufferDidChange(buffer)
+            // Nháp có dòng đầu `#!` → chuyển sang Bash (SPEC §3.5).
+            if buffer.id.isDraft, !buffer.isLanguageManual, buffer.language == .markdown,
+               Language.detectDraft(firstLine: Language.firstLine(of: buffer.text)) == .bash {
+                self.setLanguage(.bash, of: buffer, manual: false)
+            }
         }
     }
 

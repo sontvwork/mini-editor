@@ -77,8 +77,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    /// Mở file thành tab (click trên sidebar). Lỗi đọc file → báo lỗi.
+    /// File lớn hơn mức này thì hỏi trước khi mở (SPEC §3.8).
+    static let largeFileBytes = 20 * 1024 * 1024
+
+    /// Mở file thành tab (click trên sidebar). File > 20MB → hỏi trước. Lỗi đọc file → báo lỗi.
     func openFile(_ url: URL) {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        let alreadyOpen = appState.buffers[.file(path: url)] != nil
+        guard size > Self.largeFileBytes, !alreadyOpen, let window else { return performOpenFile(url) }
+        let alert = NSAlert()
+        alert.messageText = "File lớn (\(size / 1024 / 1024) MB)"
+        alert.informativeText = "Mở \(url.lastPathComponent)? File lớn có thể làm app chậm; tô màu sẽ bị tắt."
+        alert.addButton(withTitle: "Mở")
+        alert.addButton(withTitle: "Huỷ")
+        Task { @MainActor in
+            if await alert.beginSheetModal(for: window) == .alertFirstButtonReturn {
+                performOpenFile(url)
+            } else {
+                sidebar.highlight(appState.activeBuffer?.id)
+            }
+        }
+    }
+
+    private func performOpenFile(_ url: URL) {
         do {
             try appState.openFile(url)
         } catch {
@@ -169,6 +190,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private func updateStatusBar() {
         let buffer = appState.activeBuffer
         statusBar.setSaveState(buffer?.saveState, isReadOnly: buffer?.isReadOnly ?? false)
+        statusBar.setLanguage(buffer?.language)
     }
 
     private func bindState() {
@@ -195,6 +217,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         appState.onBufferReload = { [weak self] buffer in
             self?.columns.bufferDidReload(buffer)
+        }
+        appState.onBufferLanguageChange = { [weak self] buffer in
+            self?.columns.languageDidChange(for: buffer)
+            self?.updateStatusBar()
+        }
+        statusBar.onSelectLanguage = { [weak self] language in
+            guard let self, let buffer = self.appState.activeBuffer else { return }
+            self.appState.setLanguage(language, of: buffer)
         }
         appState.onDraftsChange = { [weak self] in
             self?.sidebar.reloadDrafts()

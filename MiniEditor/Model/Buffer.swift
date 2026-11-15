@@ -27,6 +27,8 @@ final class Buffer: NSObject {
     private(set) var isReadOnly: Bool
     private(set) var lineEnding: LineEnding
     var language: Language
+    /// Người dùng đã chọn ngôn ngữ bằng tay → không tự đổi nữa.
+    var isLanguageManual = false
     /// Tên nháp (file thì lấy tên file).
     var draftTitle: String
 

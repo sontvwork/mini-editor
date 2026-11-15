@@ -118,7 +118,7 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
         saveDisplayedState()
         isSwitchingBuffer = true
         displayedBuffer = buffer
-        textView.attach(buffer?.textStorage ?? emptyStorage)
+        textView.attach(buffer?.textStorage ?? emptyStorage, language: buffer?.language ?? .plain)
         applyBufferState()
     }
 
@@ -126,6 +126,11 @@ final class EditorColumnView: NSView, NSTextViewDelegate {
     func bufferDidReload() {
         isSwitchingBuffer = true
         applyBufferState()
+    }
+
+    /// Ngôn ngữ của buffer đang hiện vừa đổi → tô màu lại.
+    func languageDidChange() {
+        textView.setLanguage(displayedBuffer?.language ?? .plain)
     }
 
     /// Banner: file đổi bên ngoài (có nút), đỏ khi lưu lỗi, vàng khi file chỉ đọc (không phải UTF-8).

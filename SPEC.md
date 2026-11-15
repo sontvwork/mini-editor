@@ -322,7 +322,7 @@ Mỗi milestone làm trong một phiên riêng. Xong một milestone → build, 
 - [x] **M3 — Tab & cột:** `ColumnLayoutEngine` có đủ unit test cho mọi quy tắc 3.2, `ColumnsViewController` thêm/bớt cột động, thanh tab, các phím tắt tab/cột.
 - [x] **M4 — Tự động lưu & session:** AutosaveService (giữ quyền file, giữ kiểu xuống dòng), DraftStore, ⌘N, ⌘S/Save As, SessionStore và khôi phục đầy đủ. Test: tắt app bằng `kill -9` rồi mở lại.
 - [x] **M5 — File bị sửa từ bên ngoài:** theo dõi file đang mở, tự nạp lại, các banner xung đột/bị xoá.
-- [ ] **M6 — Tô màu:** Bash và Markdown, chỉ tô lại vùng thay đổi, menu đổi ngôn ngữ, ⌘/.
+- [x] **M6 — Tô màu:** Bash và Markdown, chỉ tô lại vùng thay đổi, menu đổi ngôn ngữ, ⌘/.
 - [ ] **M7 — Hoàn thiện:** đo hiệu năng theo mục 7 và tối ưu, đổi tên/xoá nháp, xử lý các trường hợp biên, icon app, build Release.
 
 ---
